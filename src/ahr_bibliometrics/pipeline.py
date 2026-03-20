@@ -218,11 +218,11 @@ def analyze_data() -> dict:
     return write_analysis_outputs(works, stopwords)
 
 
-def render_figures() -> list[dict]:
+def render_figures(include: set[str] | None = None) -> list[dict]:
     if not CORPUS_SUMMARY_PATH.exists():
         raise FileNotFoundError("Missing corpus summary; run preprocess first.")
     summary = json.loads(CORPUS_SUMMARY_PATH.read_text(encoding="utf-8"))
-    return render_all_figures(summary)
+    return render_all_figures(summary, include=include)
 
 
 def run_all() -> list[dict]:

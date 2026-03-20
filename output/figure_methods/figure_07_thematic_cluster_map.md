@@ -1,7 +1,11 @@
-# Figure 07. Thematic cluster map of the AhR literature
+# Document Landscape of AhR Research Themes
 
 ## Figure purpose
-Provides a reduced thematic overview of the AhR field by clustering papers on their normalized term profiles.
+Provides a document-level thematic landscape complementary to the term co-occurrence concept map.
+
+## Changes from previous version
+- This figure replaces the earlier bubble-only cluster summary with a true document landscape.
+- The redesign is intentionally complementary to Figure 04: Figure 04 maps concept co-occurrence, whereas Figure 07 maps papers in concept-profile space.
 
 ## Input data
 - Corpus: Validated AhR OpenAlex corpus
@@ -12,29 +16,30 @@ Provides a reduced thematic overview of the AhR field by clustering papers on th
 ## Preprocessing
 - English-language articles and reviews were retained.
 - Titles, available abstracts, OpenAlex keywords, and MeSH descriptors were normalized after corpus retrieval.
-- Title-plus-abstract text was used for the main term-network and clustering analyses after broader metadata trials produced noisier concept maps.
+- Disease/application tagging still uses broad metadata support, but the upgraded landscape figures use curated concept labels derived from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching.
 - Text was lowercased, punctuation-normalized, and harmonized with editable synonym mappings in configs/synonyms.yaml.
-- Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt were removed from term-heavy analyses.
+- Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt plus figure-specific concept exclusions were removed from map-style analyses.
 
 ## Analysis steps
-- TF-IDF vectors were built from normalized document text.
+- Each paper was represented by a TF-IDF concept profile derived from normalized keyword, MeSH, and targeted title/abstract concept labels.
+- The document concept matrix retained terms with min_df=20, max_df=0.25, and max_features=700; 12 latent components were used for clustering and a separate 2D TruncatedSVD projection was used for plotting.
 - MiniBatchKMeans partitioned papers into seven thematic clusters.
-- Cluster centroids were projected into two dimensions using MDS on cosine distance between centroids.
-- Each bubble is labeled by the top weighted centroid terms and sized by the number of papers in the cluster.
+- A 2D TruncatedSVD embedding was used for visualization, and cluster centroids plus envelopes summarize the dominant regions of concept space.
 
 ## Thresholds and filters
-- Seven clusters were used as a pragmatic overview scale rather than a claim of the field's true discrete structure.
-- TF-IDF features were frequency-filtered to suppress sparse one-off phrases.
+- Seven clusters were retained as a pragmatic thesis-scale compromise between detail and readability.
+- Concept terms entered the document space only if they appeared in at least 20 papers and in no more than 25% of the corpus.
 
 ## Plotting settings
-- Bubble size encodes cluster size, while label text encodes centroid-defining terms.
-- The map emphasizes interpretable thematic neighborhoods instead of precise geometric meaning.
+- Each point represents one paper.
+- Point color and the translucent cluster envelope encode thematic cluster membership.
+- Cluster labels show the cluster theme plus leading representative concepts.
 
 ## Interpretation notes
-- This figure helps identify major AhR subfields and the relative size of each thematic branch.
-- Distances are projection-based and should be read qualitatively rather than as exact semantic metrics.
+- Papers that occupy the same island share similar AhR-associated concept profiles.
+- This figure is a field-structure view rather than a citation or chronology map, so distances should be read qualitatively.
 
 ## Caveats
 - The corpus favors precision over total recall because ambiguous plain-AHR abstracts were not retrieved exhaustively.
-- OpenAlex abstract coverage is incomplete, so title-only records remain in the corpus when they pass conservative validation.
+- OpenAlex abstract coverage is incomplete, so concept-map coverage partly depends on keyword and MeSH richness rather than abstract availability alone.
 - Dictionary-tagged disease/application assignments are approximate, multi-label, and sensitive to the editable regex dictionary.

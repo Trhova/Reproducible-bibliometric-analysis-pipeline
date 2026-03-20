@@ -1,7 +1,11 @@
-# Figure 04. Term co-occurrence network across the AhR corpus
+# Conceptual Landscape of AhR Research
 
 ## Figure purpose
-Maps the main co-occurring concept structure across the full validated AhR literature.
+Maps the major conceptual regions of the AhR field using curated concept labels rather than raw token fragments.
+
+## Changes from previous version
+- This figure replaces the earlier generic force-directed NetworkX graph with a curated concept map built from concept labels and cluster-aware positioning.
+- The updated design adds explicit explanations for node size, node color, and edge meaning, and it uses a side legend plus cluster envelopes to create a more VOSviewer-like field map.
 
 ## Input data
 - Corpus: Validated AhR OpenAlex corpus
@@ -12,31 +16,32 @@ Maps the main co-occurring concept structure across the full validated AhR liter
 ## Preprocessing
 - English-language articles and reviews were retained.
 - Titles, available abstracts, OpenAlex keywords, and MeSH descriptors were normalized after corpus retrieval.
-- Title-plus-abstract text was used for the main term-network and clustering analyses after broader metadata trials produced noisier concept maps.
+- Disease/application tagging still uses broad metadata support, but the upgraded landscape figures use curated concept labels derived from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching.
 - Text was lowercased, punctuation-normalized, and harmonized with editable synonym mappings in configs/synonyms.yaml.
-- Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt were removed from term-heavy analyses.
+- Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt plus figure-specific concept exclusions were removed from map-style analyses.
 
 ## Analysis steps
-- A binary term-document matrix was built from normalized title-plus-abstract text after broader metadata trials produced noisier concept maps.
-- Pairwise term co-occurrence counts were computed across papers in the relevant corpus subset.
-- Edges were weighted by an association-strength style normalization using co-occurrence divided by the geometric mean of individual term frequencies.
-- Louvain community detection was used to assign clusters, and a weighted spring layout positioned the network.
+- Concept labels were built from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching rather than raw free-text tokens.
+- The full validated AhR corpus was used.
+- Concept co-occurrence was computed at the paper level and weighted by association strength using co-occurrence divided by the geometric mean of individual concept frequencies.
+- Louvain community detection defined thematic clusters, and a cluster-aware force layout positioned nodes to emphasize the separation of conceptual regions.
 
 ## Thresholds and filters
-- Only terms passing minimum document-frequency thresholds were eligible.
-- Only edges above count and association-strength thresholds were retained.
-- The graph was truncated to the strongest retained edges among the highest-frequency terms to keep the network readable.
+- Generic or non-informative index terms, demographic labels, and method-heavy concepts were excluded before map construction.
+- Concept labels had to appear in at least 140 papers to be eligible, and the map was capped at the 42 most prevalent retained concepts.
+- Edges were retained only when at least 26 papers carried the concept pair and the association-strength weight was at least 0.11.
 
 ## Plotting settings
-- Edges are rendered as faint weighted strokes to avoid a hairball effect.
-- Node size scales with document frequency and color indicates Louvain cluster membership.
-- Only the highest-salience labels are shown directly to preserve readability.
+- Node size encodes document frequency.
+- Node color encodes cluster assignment.
+- Edge width encodes retained co-occurrence strength.
+- Translucent cluster envelopes and a dedicated side legend panel were added to make the map legible without referring back to the methods.
 
 ## Interpretation notes
-- Clusters often represent broad AhR branches such as toxicology, immunology, microbiome/barrier biology, and cancer-related work.
-- Absence of an edge should not be interpreted as absence of a biological relationship; it only means the term pair did not survive readability-oriented thresholds.
+- This figure should be read as a conceptual landscape of the AhR field rather than as a comprehensive display of every detectable term.
+- Clusters summarize high-salience thematic neighborhoods and the bridging edges between them.
 
 ## Caveats
 - The corpus favors precision over total recall because ambiguous plain-AHR abstracts were not retrieved exhaustively.
-- OpenAlex abstract coverage is incomplete, so title-only records remain in the corpus when they pass conservative validation.
+- OpenAlex abstract coverage is incomplete, so concept-map coverage partly depends on keyword and MeSH richness rather than abstract availability alone.
 - Dictionary-tagged disease/application assignments are approximate, multi-label, and sensitive to the editable regex dictionary.

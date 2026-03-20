@@ -10,6 +10,12 @@ def write_methods_file(path: Path, metadata: dict) -> None:
         "## Figure purpose",
         metadata["purpose"],
         "",
+    ]
+    if metadata.get("changes"):
+        lines.extend(["## Changes from previous version"])
+        lines.extend(f"- {item}" for item in metadata["changes"])
+        lines.append("")
+    lines.extend([
         "## Input data",
         f"- Corpus: {metadata['corpus_name']}",
         f"- Number of papers: {metadata['n_papers']}",
@@ -17,7 +23,7 @@ def write_methods_file(path: Path, metadata: dict) -> None:
         f"- Query strategy: {metadata['query_summary']}",
         "",
         "## Preprocessing",
-    ]
+    ])
     lines.extend(f"- {item}" for item in metadata["preprocessing"])
     lines.extend(["", "## Analysis steps"])
     lines.extend(f"- {item}" for item in metadata["analysis_steps"])
@@ -30,4 +36,3 @@ def write_methods_file(path: Path, metadata: dict) -> None:
     lines.extend(["", "## Caveats"])
     lines.extend(f"- {item}" for item in metadata["caveats"])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
-
+from matplotlib.lines import Line2D
+from matplotlib.patches import Ellipse, PathPatch, Rectangle
+from matplotlib.path import Path
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -24,54 +24,7 @@ BASE_COLORS = {
     "plum": "#8A5E7B",
     "sand": "#D8CCB4",
 }
-NETWORK_PALETTE = ["#A44A3F", "#C08A3E", "#5F8F7A", "#377D86", "#60708B", "#8A5E7B", "#B9C0C9", "#4E5A65"]
-NETWORK_LABEL_SKIP = {
-    "helix",
-    "loop_helix",
-    "helix_loop",
-    "helix_loop_helix",
-    "basic_helix",
-    "basic_helix_loop",
-    "activated_transcription",
-    "ligand_activated_transcription",
-    "activated_transcription_factor",
-    "translocator",
-    "nuclear_translocator",
-    "compared",
-    "shown",
-    "abstract",
-    "binding",
-}
-NETWORK_LABEL_PREFERENCES = [
-    "dioxin",
-    "tcdd",
-    "cytochrome",
-    "p450",
-    "arnt",
-    "translocator",
-    "benzo",
-    "pyrene",
-    "formylindolo",
-    "cyp1a1",
-    "cancer",
-    "tumor",
-    "breast",
-    "microbiome",
-    "gut",
-    "intestinal",
-    "inflammation",
-    "inflammatory",
-    "tryptophan",
-    "kynurenine",
-    "indole",
-    "fatty",
-    "acetic",
-    "oxygen",
-    "skin",
-    "homeostasis",
-    "host",
-    "metabolic",
-]
+NETWORK_PALETTE = ["#A44A3F", "#C08A3E", "#5F8F7A", "#377D86", "#60708B", "#8A5E7B", "#8290A4", "#A3B18A"]
 
 
 def set_plot_style() -> None:
@@ -116,13 +69,13 @@ def _methods_common(summary: dict) -> dict:
         "preprocessing": [
             "English-language articles and reviews were retained.",
             "Titles, available abstracts, OpenAlex keywords, and MeSH descriptors were normalized after corpus retrieval.",
-            "Title-plus-abstract text was used for the main term-network and clustering analyses after broader metadata trials produced noisier concept maps.",
+            "Disease/application tagging still uses broad metadata support, but the upgraded landscape figures use curated concept labels derived from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching.",
             "Text was lowercased, punctuation-normalized, and harmonized with editable synonym mappings in configs/synonyms.yaml.",
-            "Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt were removed from term-heavy analyses.",
+            "Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt plus figure-specific concept exclusions were removed from map-style analyses.",
         ],
         "caveats": [
             "The corpus favors precision over total recall because ambiguous plain-AHR abstracts were not retrieved exhaustively.",
-            "OpenAlex abstract coverage is incomplete, so title-only records remain in the corpus when they pass conservative validation.",
+            "OpenAlex abstract coverage is incomplete, so concept-map coverage partly depends on keyword and MeSH richness rather than abstract availability alone.",
             "Dictionary-tagged disease/application assignments are approximate, multi-label, and sensitive to the editable regex dictionary.",
         ],
     }
@@ -130,7 +83,6 @@ def _methods_common(summary: dict) -> dict:
 
 def render_publications_over_time(summary: dict) -> dict:
     annual = pd.read_csv(TABLE_DIR / "publication_counts.csv")
-    theme = pd.read_csv(TABLE_DIR / "publication_theme_counts.csv")
     set_plot_style()
     fig, axes = plt.subplots(2, 1, figsize=(11.5, 8), sharex=True, gridspec_kw={"height_ratios": [2.3, 1]})
 
@@ -266,7 +218,7 @@ def render_disease_trends(summary: dict) -> dict:
         "title": "Figure 03. Disease and application trends across AhR field eras",
         "purpose": "Shows how major AhR application areas changed in prominence from early to recent literature.",
         "analysis_steps": [
-            "The corpus was sliced into 1970-1999, 2000-2012, and 2013-2026 using the editable config file.",
+            "The corpus was sliced into 1980-1999, 2000-2012, and 2013-2026 using the editable config file.",
             "Multi-label dictionary tags were counted within each period.",
             "Counts were normalized by the number of papers in each period to plot within-period share rather than raw volume alone.",
         ],
@@ -287,123 +239,325 @@ def render_disease_trends(summary: dict) -> dict:
     return metadata
 
 
-def _draw_network(ax: plt.Axes, nodes: pd.DataFrame, edges: pd.DataFrame, title: str) -> None:
-    graph = nx.Graph()
-    for _, row in edges.iterrows():
-        graph.add_edge(row["source"], row["target"], weight=row["weight"])
-    pos = {row["term"]: (row["x"], row["y"]) for _, row in nodes.iterrows()}
-    cluster_colors = {cluster: NETWORK_PALETTE[(cluster - 1) % len(NETWORK_PALETTE)] for cluster in nodes["cluster"].unique()}
-    for _, edge in edges.iterrows():
-        x0, y0 = pos[edge["source"]]
-        x1, y1 = pos[edge["target"]]
-        ax.plot([x0, x1], [y0, y1], color="#B8B3A7", linewidth=0.5 + edge["weight"] * 2.0, alpha=0.24, zorder=1)
-    sizes = 18 + nodes["frequency"].to_numpy() * 0.7
+def _cluster_color_map(clusters: pd.DataFrame) -> dict[int, str]:
+    return {int(cluster): NETWORK_PALETTE[idx % len(NETWORK_PALETTE)] for idx, cluster in enumerate(sorted(clusters["cluster"].unique()))}
+
+
+def _node_sizes(nodes: pd.DataFrame) -> np.ndarray:
+    return 40 + 16 * np.sqrt(nodes["frequency"].to_numpy()) + 90 * nodes["weighted_degree"].to_numpy()
+
+
+def _draw_cluster_envelopes(ax: plt.Axes, nodes: pd.DataFrame, color_map: dict[int, str]) -> None:
+    for cluster_id, cluster_nodes in nodes.groupby("cluster"):
+        points = cluster_nodes[["x", "y"]].to_numpy()
+        center = points.mean(axis=0)
+        if len(points) == 1:
+            width = height = 0.7
+            angle = 0.0
+        else:
+            cov = np.cov(points.T)
+            eigvals, eigvecs = np.linalg.eigh(cov)
+            order = np.argsort(eigvals)[::-1]
+            eigvals = eigvals[order]
+            eigvecs = eigvecs[:, order]
+            angle = np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0]))
+            width = 3.8 * np.sqrt(max(eigvals[0], 0.02)) + 0.8
+            height = 3.2 * np.sqrt(max(eigvals[-1], 0.02)) + 0.6
+        patch = Ellipse(
+            xy=center,
+            width=width,
+            height=height,
+            angle=angle,
+            facecolor=color_map[int(cluster_id)],
+            edgecolor="none",
+            alpha=0.12,
+            zorder=0,
+        )
+        ax.add_patch(patch)
+
+
+def _select_network_labels(nodes: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for _, cluster_nodes in nodes.groupby("cluster"):
+        rows.append(cluster_nodes.sort_values(["weighted_degree", "frequency"], ascending=False).head(3))
+    label_nodes = pd.concat(rows).drop_duplicates(subset="term")
+    return label_nodes.sort_values(["weighted_degree", "frequency"], ascending=False).head(16)
+
+
+def _draw_network_map(ax: plt.Axes, nodes: pd.DataFrame, edges: pd.DataFrame, clusters: pd.DataFrame, title: str, subtitle: str) -> None:
+    color_map = _cluster_color_map(clusters)
+    _draw_cluster_envelopes(ax, nodes, color_map)
+
+    edge_width = 0.4 + 4.2 * (edges["weight"] / edges["weight"].max())
+    for (_, edge), width in zip(edges.iterrows(), edge_width, strict=False):
+        source = nodes.loc[nodes["term"] == edge["source"]].iloc[0]
+        target = nodes.loc[nodes["term"] == edge["target"]].iloc[0]
+        alpha = 0.12 if edge["source_cluster"] != edge["target_cluster"] else 0.26
+        ax.plot(
+            [source["x"], target["x"]],
+            [source["y"], target["y"]],
+            color="#B7B0A2",
+            linewidth=width,
+            alpha=alpha,
+            zorder=1,
+        )
+
+    sizes = _node_sizes(nodes)
     ax.scatter(
         nodes["x"],
         nodes["y"],
         s=sizes,
-        c=[cluster_colors[c] for c in nodes["cluster"]],
-        alpha=0.92,
-        linewidth=0.6,
+        c=[color_map[int(cluster)] for cluster in nodes["cluster"]],
         edgecolors="#FBF9F4",
-        zorder=3,
+        linewidths=0.9,
+        alpha=0.95,
+        zorder=2,
     )
-    label_pool = nodes.loc[~nodes["term"].isin(NETWORK_LABEL_SKIP)].sort_values(["degree", "frequency"], ascending=False)
-    preferred = label_pool[label_pool["term"].apply(lambda term: any(token in term for token in NETWORK_LABEL_PREFERENCES))]
-    fallback = label_pool[~label_pool["term"].isin(preferred["term"])]
-    label_nodes = pd.concat([preferred, fallback]).drop_duplicates(subset="term").head(14)
+
+    label_nodes = _select_network_labels(nodes)
+    cluster_centers = nodes.groupby("cluster")[["x", "y"]].mean()
     for _, row in label_nodes.iterrows():
+        center = cluster_centers.loc[row["cluster"]]
+        dx = row["x"] - center["x"]
+        dy = row["y"] - center["y"]
+        norm = np.hypot(dx, dy) or 1.0
         ax.text(
-            row["x"],
-            row["y"],
-            row["term"].replace("_", " "),
-            fontsize=9.5,
+            row["x"] + 0.08 * dx / norm,
+            row["y"] + 0.08 * dy / norm,
+            row["term"],
+            fontsize=10.2,
             ha="center",
             va="center",
-            zorder=4,
-            bbox={"boxstyle": "round,pad=0.18", "fc": "#FBF9F4", "ec": "none", "alpha": 0.78},
+            zorder=3,
+            bbox={"boxstyle": "round,pad=0.18", "fc": "#FBF9F4", "ec": "none", "alpha": 0.84},
         )
-    ax.set_title(title)
+
+    ax.set_title(title, loc="left", pad=14)
+    ax.text(0.0, 0.98, subtitle, transform=ax.transAxes, va="top", fontsize=10.2, color=BASE_COLORS["slate"])
+    x_pad = max((nodes["x"].max() - nodes["x"].min()) * 0.08, 0.55)
+    y_pad = max((nodes["y"].max() - nodes["y"].min()) * 0.12, 0.55)
+    ax.set_xlim(nodes["x"].min() - x_pad, nodes["x"].max() + x_pad)
+    ax.set_ylim(nodes["y"].min() - y_pad, nodes["y"].max() + y_pad)
     ax.set_xticks([])
     ax.set_yticks([])
     for spine in ax.spines.values():
         spine.set_visible(False)
 
 
-def render_network(summary: dict, nodes_file: str, edges_file: str, stem: str, title: str, purpose: str, thresholds: list[str], interpretation: list[str]) -> dict:
+def _draw_network_side_panel(ax: plt.Axes, nodes: pd.DataFrame, edges: pd.DataFrame, clusters: pd.DataFrame) -> None:
+    ax.axis("off")
+    color_map = _cluster_color_map(clusters)
+    ax.text(0.0, 0.98, "How to read this map", fontsize=12.2, fontweight="semibold", va="top")
+    ax.text(0.0, 0.92, "Node size: number of papers carrying the concept", fontsize=9.8, va="top")
+    ax.text(0.0, 0.88, "Node color: thematic cluster from Louvain community detection", fontsize=9.8, va="top")
+    ax.text(0.0, 0.84, "Edge width: co-occurrence strength between concept labels", fontsize=9.8, va="top")
+
+    size_samples = np.percentile(nodes["frequency"], [35, 65, 90]).astype(int)
+    y_base = 0.74
+    for idx, freq in enumerate(size_samples):
+        size = 40 + 16 * np.sqrt(freq) + 90 * np.percentile(nodes["weighted_degree"], 60)
+        ax.scatter(0.12 + idx * 0.17, y_base, s=size, color="#AEB7C2", edgecolors="#FBF9F4", linewidths=0.9)
+        ax.text(0.12 + idx * 0.17, y_base - 0.09, f"{freq} papers", ha="center", fontsize=8.9)
+
+    ax.text(0.0, 0.63, "Thematic clusters", fontsize=12.0, fontweight="semibold", va="top")
+    y = 0.59
+    for _, row in clusters.sort_values("total_frequency", ascending=False).iterrows():
+        ax.add_patch(Rectangle((0.0, y - 0.018), 0.04, 0.028, facecolor=color_map[int(row["cluster"])], edgecolor="none"))
+        ax.text(0.055, y, f"Cluster {int(row['cluster'])}: {row['cluster_label']}", fontsize=9.9, va="center")
+        ax.text(0.055, y - 0.038, row["top_terms"].replace(" | ", ", "), fontsize=8.7, color=BASE_COLORS["slate"], va="center")
+        y -= 0.095
+
+    ax.text(0.0, 0.05, f"Displayed concepts: {len(nodes)}\nDisplayed edges: {len(edges)}", fontsize=9.2, color=BASE_COLORS["slate"])
+
+
+def render_concept_map(
+    summary: dict,
+    nodes_file: str,
+    edges_file: str,
+    clusters_file: str,
+    stem: str,
+    title: str,
+    subtitle: str,
+    purpose: str,
+    subset_note: str,
+    changes: list[str],
+    threshold_notes: list[str],
+) -> dict:
     nodes = pd.read_csv(TABLE_DIR / nodes_file)
     edges = pd.read_csv(TABLE_DIR / edges_file)
+    clusters = pd.read_csv(TABLE_DIR / clusters_file)
     set_plot_style()
-    fig, ax = plt.subplots(figsize=(11.2, 8.8))
-    _draw_network(ax, nodes, edges, title)
+    fig = plt.figure(figsize=(14.2, 8.6))
+    gs = fig.add_gridspec(1, 2, width_ratios=[4.4, 1.45], wspace=0.06)
+    ax_map = fig.add_subplot(gs[0, 0])
+    ax_side = fig.add_subplot(gs[0, 1])
+    _draw_network_map(ax_map, nodes, edges, clusters, title, subtitle)
+    _draw_network_side_panel(ax_side, nodes, edges, clusters)
     save_figure(fig, stem)
+
     metadata = _methods_common(summary) | {
         "title": title,
         "purpose": purpose,
+        "changes": changes,
         "analysis_steps": [
-            "A binary term-document matrix was built from normalized title-plus-abstract text after broader metadata trials produced noisier concept maps.",
-            "Pairwise term co-occurrence counts were computed across papers in the relevant corpus subset.",
-            "Edges were weighted by an association-strength style normalization using co-occurrence divided by the geometric mean of individual term frequencies.",
-            "Louvain community detection was used to assign clusters, and a weighted spring layout positioned the network.",
+            "Concept labels were built from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching rather than raw free-text tokens.",
+            subset_note,
+            "Concept co-occurrence was computed at the paper level and weighted by association strength using co-occurrence divided by the geometric mean of individual concept frequencies.",
+            "Louvain community detection defined thematic clusters, and a cluster-aware force layout positioned nodes to emphasize the separation of conceptual regions.",
         ],
-        "thresholds": thresholds,
+        "thresholds": [
+            "Generic or non-informative index terms, demographic labels, and method-heavy concepts were excluded before map construction.",
+            *threshold_notes,
+        ],
         "plotting": [
-            "Edges are rendered as faint weighted strokes to avoid a hairball effect.",
-            "Node size scales with document frequency and color indicates Louvain cluster membership.",
-            "Only the highest-salience labels are shown directly to preserve readability.",
+            "Node size encodes document frequency.",
+            "Node color encodes cluster assignment.",
+            "Edge width encodes retained co-occurrence strength.",
+            "Translucent cluster envelopes and a dedicated side legend panel were added to make the map legible without referring back to the methods.",
         ],
-        "interpretation": interpretation,
+        "interpretation": [
+            "This figure should be read as a conceptual landscape of the AhR field rather than as a comprehensive display of every detectable term.",
+            "Clusters summarize high-salience thematic neighborhoods and the bridging edges between them.",
+        ],
     }
     write_methods_file(METHODS_DIR / f"{stem}.md", metadata)
     return metadata
 
 
-def render_term_evolution(summary: dict) -> dict:
-    evolution = pd.read_csv(TABLE_DIR / "term_evolution.csv")
-    order = (
-        evolution.groupby("term")["prevalence"]
-        .max()
-        .sort_values(ascending=False)
-        .head(16)
-        .index
+def _draw_alluvial_ribbon(ax: plt.Axes, x0: float, x1: float, y0: tuple[float, float], y1: tuple[float, float], color: str) -> None:
+    ctrl = (x1 - x0) * 0.45
+    verts = [
+        (x0, y0[0]),
+        (x0 + ctrl, y0[0]),
+        (x1 - ctrl, y1[0]),
+        (x1, y1[0]),
+        (x1, y1[1]),
+        (x1 - ctrl, y1[1]),
+        (x0 + ctrl, y0[1]),
+        (x0, y0[1]),
+        (x0, y0[0]),
+    ]
+    codes = [
+        Path.MOVETO,
+        Path.CURVE4,
+        Path.CURVE4,
+        Path.CURVE4,
+        Path.LINETO,
+        Path.CURVE4,
+        Path.CURVE4,
+        Path.CURVE4,
+        Path.CLOSEPOLY,
+    ]
+    patch = PathPatch(Path(verts, codes), facecolor=color, edgecolor="none", alpha=0.66, zorder=1)
+    ax.add_patch(patch)
+
+
+def render_thematic_evolution(summary: dict) -> dict:
+    cluster_period = pd.read_csv(TABLE_DIR / "cluster_period_shares.csv")
+    cluster_summary = pd.read_csv(TABLE_DIR / "cluster_summary.csv")
+    color_map = _cluster_color_map(cluster_summary)
+    periods = list(dict.fromkeys(cluster_period["time_slice"]))
+    recent_order = (
+        cluster_period[cluster_period["time_slice"] == periods[-1]]
+        .sort_values("share", ascending=False)["cluster"]
+        .tolist()
     )
-    subset = evolution[evolution["term"].isin(order)].copy()
-    subset["display_term"] = subset["term"].str.replace("_", " ")
+    order = recent_order
+    gap = 0.012
+    positions: dict[tuple[str, int], tuple[float, float]] = {}
+    for period in periods:
+        period_df = (
+            cluster_period[cluster_period["time_slice"] == period]
+            .set_index("cluster")
+            .reindex(order)
+            .fillna({"share": 0.0, "n_papers": 0, "period_total": 1})
+            .reset_index()
+        )
+        y_top = 1.0
+        for _, row in period_df.iterrows():
+            share = float(row["share"])
+            y_bottom = y_top - share
+            positions[(period, int(row["cluster"]))] = (y_bottom, y_top)
+            y_top = y_bottom - gap
+
     set_plot_style()
-    fig, ax = plt.subplots(figsize=(12, 8))
-    periods = list(dict.fromkeys(subset["period"]))
-    x_positions = {period: idx for idx, period in enumerate(periods)}
-    term_delta = subset.groupby("display_term")["prevalence"].agg(lambda s: s.iloc[-1] - s.iloc[0]).sort_values()
-    color_map = {term: BASE_COLORS["brick"] if delta > 0 else BASE_COLORS["slate"] for term, delta in term_delta.items()}
-    for term, group in subset.groupby("display_term"):
-        xs = [x_positions[p] for p in group["period"]]
-        ys = group["prevalence"].to_numpy()
-        ax.plot(xs, ys, marker="o", linewidth=2.2, color=color_map[term], alpha=0.82)
-        ax.text(xs[-1] + 0.05, ys[-1], term, va="center", fontsize=9.5)
-    ax.set_xticks(range(len(periods)), periods)
-    ax.set_ylabel("Document prevalence")
-    ax.set_title("Shifting Language Around AhR Across Field Eras")
-    ax.spines[["top", "right"]].set_visible(False)
+    fig = plt.figure(figsize=(14.0, 8.0))
+    gs = fig.add_gridspec(1, 2, width_ratios=[4.0, 1.55], wspace=0.04)
+    ax = fig.add_subplot(gs[0, 0])
+    side = fig.add_subplot(gs[0, 1])
+    xs = np.linspace(0, 2, len(periods))
+
+    for i in range(len(periods) - 1):
+        p0 = periods[i]
+        p1 = periods[i + 1]
+        for cluster in order:
+            _draw_alluvial_ribbon(ax, xs[i], xs[i + 1], positions[(p0, cluster)], positions[(p1, cluster)], color_map[int(cluster)])
+
+    for x, period in zip(xs, periods, strict=True):
+        period_total = int(cluster_period.loc[cluster_period["time_slice"] == period, "period_total"].iloc[0])
+        ax.text(x, 1.03, period, ha="center", fontsize=12.2, fontweight="semibold")
+        ax.text(x, 0.995, f"{period_total:,} papers", ha="center", fontsize=9.4, color=BASE_COLORS["slate"])
+        ax.add_patch(Rectangle((x - 0.03, 0), 0.06, 1.0, facecolor="#F2ECE0", edgecolor="#D8D0C2", linewidth=0.8, zorder=0))
+
+    ax.set_xlim(-0.25, 2.9)
+    ax.set_ylim(0, 1.08)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title("Thematic Evolution of AhR Research", loc="left", pad=14)
+    ax.text(
+        0.0,
+        1.01,
+        "Ribbon width shows the share of papers assigned to each thematic cluster within each era.",
+        transform=ax.transAxes,
+        fontsize=10.2,
+        color=BASE_COLORS["slate"],
+    )
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    side.axis("off")
+    side.text(0.0, 0.98, "How to read this map", fontsize=12.2, fontweight="semibold", va="top")
+    side.text(0.0, 0.92, "Ribbon color: thematic cluster", fontsize=9.8, va="top")
+    side.text(0.0, 0.88, "Ribbon width: within-period cluster share", fontsize=9.8, va="top")
+    side.text(0.0, 0.84, "Columns: 1980-1999, 2000-2012, 2013-2026", fontsize=9.8, va="top")
+    side.text(0.0, 0.76, "Clusters tracked across time", fontsize=12.0, fontweight="semibold", va="top")
+    y = 0.71
+    recent_period = periods[-1]
+    recent = cluster_period[cluster_period["time_slice"] == recent_period].set_index("cluster")
+    for _, row in cluster_summary.sort_values("n_papers", ascending=False).iterrows():
+        cluster = int(row["cluster"])
+        side.add_patch(Rectangle((0.0, y - 0.018), 0.04, 0.028, facecolor=color_map[cluster], edgecolor="none"))
+        side.text(0.055, y, f"Cluster {cluster}: {row['cluster_label']}", fontsize=9.5, va="center")
+        share = float(recent.loc[cluster, "share"]) if cluster in recent.index else 0.0
+        side.text(0.055, y - 0.036, f"Recent-era share: {share:.0%}", fontsize=8.6, color=BASE_COLORS["slate"])
+        y -= 0.09
+
     save_figure(fig, "figure_06_thematic_evolution")
     metadata = _methods_common(summary) | {
-        "title": "Figure 06. Thematic evolution of AhR-associated language",
-        "purpose": "Highlights terms whose prevalence rose or fell most strongly across early, middle, and recent AhR eras.",
+        "title": "Thematic Evolution of AhR Research",
+        "purpose": "Shows how the major thematic clusters of the AhR field changed across early, middle, and recent eras.",
+        "changes": [
+            "This figure replaces the earlier heatmap-style evolution view with an alluvial-style cluster-flow map.",
+            "The redesign makes the rise of microbiome, barrier, immune, and cancer-linked AhR themes easier to compare against older toxicology-centered themes.",
+        ],
         "analysis_steps": [
-            "A document-term matrix was built with conservative frequency thresholds to focus on reusable field-level vocabulary.",
-            "Within each time slice, term prevalence was defined as the share of papers containing the term at least once.",
-            "The largest positive and negative recent-versus-early changes were selected for plotting.",
+            "Papers were clustered on TF-IDF concept profiles derived from normalized keyword, MeSH, and targeted title/abstract marker labels.",
+            "The concept-profile matrix retained terms with min_df=20, max_df=0.25, and max_features=700 before TruncatedSVD reduction and MiniBatchKMeans clustering.",
+            "Cluster assignments were counted within each of the three configured time slices.",
+            "Cluster counts were normalized by the number of papers in each period so ribbon widths represent within-period share rather than raw volume only.",
         ],
         "thresholds": [
-            "Terms had to pass corpus-level document-frequency thresholds embedded in the analysis module.",
-            "Only 16 high-change terms were plotted to keep the slope chart readable.",
+            "Seven document clusters were retained as a readable thesis-scale thematic summary.",
+            "The alluvial order was fixed across periods so changes in ribbon width reflect thematic growth or contraction rather than re-sorting artifacts.",
         ],
         "plotting": [
-            "Rising terms are colored in brick and declining terms in slate.",
-            "A slope-style layout was chosen to foreground directional change rather than absolute frequency alone.",
+            "Ribbon color encodes thematic cluster identity.",
+            "Ribbon width encodes the share of papers assigned to that cluster within a given period.",
+            "Period headers include the number of papers in each era to make denominator changes explicit.",
         ],
         "interpretation": [
-            "This figure is useful for narrating the shift from older toxicology-led terminology toward more recent immune, barrier, microbiome, and cancer language.",
-            "Changes reflect metadata language prevalence, not mechanistic causality or the scientific importance of a term.",
+            "Expanding ribbons in the recent era indicate themes that gained relative prominence, such as microbiome, barrier, immune, and tryptophan-linked work.",
+            "Narrowing ribbons point to themes that became relatively less dominant as the field diversified.",
         ],
     }
     write_methods_file(METHODS_DIR / "figure_06_thematic_evolution.md", metadata)
@@ -411,53 +565,136 @@ def render_term_evolution(summary: dict) -> dict:
 
 
 def render_cluster_map(summary: dict) -> dict:
-    cluster = pd.read_csv(TABLE_DIR / "cluster_summary.csv")
-    cluster["x_plot"] = (cluster["x"] - cluster["x"].mean()) / cluster["x"].std(ddof=0)
-    cluster["y_plot"] = (cluster["y"] - cluster["y"].mean()) / cluster["y"].std(ddof=0)
+    docs = pd.read_csv(TABLE_DIR / "cluster_assignments.csv")
+    clusters = pd.read_csv(TABLE_DIR / "cluster_summary.csv")
+    color_map = _cluster_color_map(clusters)
+    docs["x_plot"] = (docs["x"] - docs["x"].median()) / docs["x"].std(ddof=0)
+    docs["y_plot"] = (docs["y"] - docs["y"].median()) / docs["y"].std(ddof=0)
+    centers = docs.groupby("cluster")[["x_plot", "y_plot"]].median().reset_index().merge(
+        clusters[["cluster", "cluster_label", "n_papers", "median_year", "top_terms"]],
+        on="cluster",
+        how="left",
+    )
+
     set_plot_style()
-    fig, ax = plt.subplots(figsize=(10.8, 8))
-    colors = [NETWORK_PALETTE[(c - 1) % len(NETWORK_PALETTE)] for c in cluster["cluster"]]
-    ax.scatter(cluster["x_plot"], cluster["y_plot"], s=cluster["n_papers"] * 1.8, color=colors, alpha=0.86, edgecolor="#FBF9F4", linewidth=1.2)
-    for _, row in cluster.iterrows():
-        terms = row["top_terms"].replace("_", " ").split(", ")
-        wrapped = ", ".join(terms[:3]) + "\n" + ", ".join(terms[3:5])
+    fig = plt.figure(figsize=(14.0, 8.4))
+    gs = fig.add_gridspec(1, 2, width_ratios=[4.0, 1.55], wspace=0.04)
+    ax = fig.add_subplot(gs[0, 0])
+    side = fig.add_subplot(gs[0, 1])
+
+    for cluster_id, subset in docs.groupby("cluster"):
+        points = subset[["x_plot", "y_plot"]].to_numpy()
+        center = points.mean(axis=0)
+        if len(points) > 2:
+            cov = np.cov(points.T)
+            eigvals, eigvecs = np.linalg.eigh(cov)
+            order = np.argsort(eigvals)[::-1]
+            eigvals = eigvals[order]
+            eigvecs = eigvecs[:, order]
+            angle = np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0]))
+            width = 4.2 * np.sqrt(max(eigvals[0], 0.03)) + 0.7
+            height = 4.2 * np.sqrt(max(eigvals[-1], 0.03)) + 0.55
+            ax.add_patch(
+                Ellipse(
+                    xy=center,
+                    width=width,
+                    height=height,
+                    angle=angle,
+                    facecolor=color_map[int(cluster_id)],
+                    edgecolor="none",
+                    alpha=0.10,
+                    zorder=0,
+                )
+            )
+        ax.scatter(
+            subset["x_plot"],
+            subset["y_plot"],
+            s=14,
+            color=color_map[int(cluster_id)],
+            alpha=0.18,
+            edgecolors="none",
+            zorder=1,
+        )
+
+    label_offsets = {
+        1: (-0.42, 0.22),
+        2: (-0.26, -0.22),
+        3: (0.32, -0.16),
+        4: (0.25, 0.20),
+        5: (0.35, -0.08),
+        6: (-0.35, 0.05),
+        7: (0.18, 0.28),
+    }
+    label_centers = centers.sort_values("n_papers", ascending=False).head(5)
+    for _, row in label_centers.iterrows():
+        terms = row["top_terms"].split(", ")
+        offset_x, offset_y = label_offsets.get(int(row["cluster"]), (0.0, 0.0))
+        label = f"Cluster {int(row['cluster'])}\n{row['cluster_label']}\n{', '.join(terms[:3])}"
         ax.text(
-            row["x_plot"],
-            row["y_plot"],
-            f"Cluster {row['cluster']}\n{wrapped}",
+            row["x_plot"] + offset_x,
+            row["y_plot"] + offset_y,
+            label,
             ha="center",
             va="center",
-            fontsize=9.3,
-            bbox={"boxstyle": "round,pad=0.28", "fc": "#FBF9F4", "ec": "none", "alpha": 0.84},
+            fontsize=9.6,
+            bbox={"boxstyle": "round,pad=0.24", "fc": "#FBF9F4", "ec": "none", "alpha": 0.88},
+            zorder=2,
         )
-    ax.set_title("Thematic Cluster Map of the AhR Literature")
+
+    ax.set_title("Document Landscape of AhR Research Themes", loc="left", pad=14)
+    ax.text(
+        0.0,
+        1.01,
+        "Each point is one paper positioned in 2D concept space; colored islands summarize the major thematic clusters.",
+        transform=ax.transAxes,
+        fontsize=10.2,
+        color=BASE_COLORS["slate"],
+    )
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_xlim(cluster["x_plot"].min() - 0.7, cluster["x_plot"].max() + 0.7)
-    ax.set_ylim(cluster["y_plot"].min() - 0.7, cluster["y_plot"].max() + 0.7)
     for spine in ax.spines.values():
         spine.set_visible(False)
+
+    side.axis("off")
+    side.text(0.0, 0.98, "How to read this map", fontsize=12.2, fontweight="semibold", va="top")
+    side.text(0.0, 0.92, "Each point: one paper", fontsize=9.8, va="top")
+    side.text(0.0, 0.88, "Color and island envelope: thematic cluster", fontsize=9.8, va="top")
+    side.text(0.0, 0.84, "Distances: qualitative similarity in concept-profile space", fontsize=9.8, va="top")
+    side.text(0.0, 0.76, "Cluster summaries", fontsize=12.0, fontweight="semibold", va="top")
+    y = 0.71
+    for _, row in clusters.sort_values("n_papers", ascending=False).iterrows():
+        cluster = int(row["cluster"])
+        side.add_patch(Rectangle((0.0, y - 0.018), 0.04, 0.028, facecolor=color_map[cluster], edgecolor="none"))
+        side.text(0.055, y, f"Cluster {cluster}: {row['cluster_label']}", fontsize=9.5, va="center")
+        side.text(0.055, y - 0.036, f"{int(row['n_papers']):,} papers | median year {int(row['median_year'])}", fontsize=8.6, color=BASE_COLORS["slate"])
+        y -= 0.09
+
     save_figure(fig, "figure_07_thematic_cluster_map")
     metadata = _methods_common(summary) | {
-        "title": "Figure 07. Thematic cluster map of the AhR literature",
-        "purpose": "Provides a reduced thematic overview of the AhR field by clustering papers on their normalized term profiles.",
+        "title": "Document Landscape of AhR Research Themes",
+        "purpose": "Provides a document-level thematic landscape complementary to the term co-occurrence concept map.",
+        "changes": [
+            "This figure replaces the earlier bubble-only cluster summary with a true document landscape.",
+            "The redesign is intentionally complementary to Figure 04: Figure 04 maps concept co-occurrence, whereas Figure 07 maps papers in concept-profile space.",
+        ],
         "analysis_steps": [
-            "TF-IDF vectors were built from normalized document text.",
+            "Each paper was represented by a TF-IDF concept profile derived from normalized keyword, MeSH, and targeted title/abstract concept labels.",
+            "The document concept matrix retained terms with min_df=20, max_df=0.25, and max_features=700; 12 latent components were used for clustering and a separate 2D TruncatedSVD projection was used for plotting.",
             "MiniBatchKMeans partitioned papers into seven thematic clusters.",
-            "Cluster centroids were projected into two dimensions using MDS on cosine distance between centroids.",
-            "Each bubble is labeled by the top weighted centroid terms and sized by the number of papers in the cluster.",
+            "A 2D TruncatedSVD embedding was used for visualization, and cluster centroids plus envelopes summarize the dominant regions of concept space.",
         ],
         "thresholds": [
-            "Seven clusters were used as a pragmatic overview scale rather than a claim of the field's true discrete structure.",
-            "TF-IDF features were frequency-filtered to suppress sparse one-off phrases.",
+            "Seven clusters were retained as a pragmatic thesis-scale compromise between detail and readability.",
+            "Concept terms entered the document space only if they appeared in at least 20 papers and in no more than 25% of the corpus.",
         ],
         "plotting": [
-            "Bubble size encodes cluster size, while label text encodes centroid-defining terms.",
-            "The map emphasizes interpretable thematic neighborhoods instead of precise geometric meaning.",
+            "Each point represents one paper.",
+            "Point color and the translucent cluster envelope encode thematic cluster membership.",
+            "Cluster labels show the cluster theme plus leading representative concepts.",
         ],
         "interpretation": [
-            "This figure helps identify major AhR subfields and the relative size of each thematic branch.",
-            "Distances are projection-based and should be read qualitatively rather than as exact semantic metrics.",
+            "Papers that occupy the same island share similar AhR-associated concept profiles.",
+            "This figure is a field-structure view rather than a citation or chronology map, so distances should be read qualitatively.",
         ],
     }
     write_methods_file(METHODS_DIR / "figure_07_thematic_cluster_map.md", metadata)
@@ -496,46 +733,55 @@ def render_top_journals(summary: dict) -> dict:
     return metadata
 
 
-def render_all_figures(summary: dict) -> list[dict]:
-    outputs = [
-        render_publications_over_time(summary),
-        render_disease_distribution(summary),
-        render_disease_trends(summary),
-        render_network(
+def render_all_figures(summary: dict, include: set[str] | None = None) -> list[dict]:
+    renderers = {
+        "figure_01_publications_over_time": lambda: render_publications_over_time(summary),
+        "figure_02_disease_application_distribution": lambda: render_disease_distribution(summary),
+        "figure_03_disease_application_trends": lambda: render_disease_trends(summary),
+        "figure_04_keyword_network_all_corpus": lambda: render_concept_map(
             summary,
             nodes_file="network_all_nodes.csv",
             edges_file="network_all_edges.csv",
+            clusters_file="network_all_clusters.csv",
             stem="figure_04_keyword_network_all_corpus",
-            title="Figure 04. Term co-occurrence network across the AhR corpus",
-            purpose="Maps the main co-occurring concept structure across the full validated AhR literature.",
-            thresholds=[
-                "Only terms passing minimum document-frequency thresholds were eligible.",
-                "Only edges above count and association-strength thresholds were retained.",
-                "The graph was truncated to the strongest retained edges among the highest-frequency terms to keep the network readable.",
+            title="Conceptual Landscape of AhR Research",
+            subtitle="Curated concept co-occurrence map across the full validated AhR corpus",
+            purpose="Maps the major conceptual regions of the AhR field using curated concept labels rather than raw token fragments.",
+            subset_note="The full validated AhR corpus was used.",
+            changes=[
+                "This figure replaces the earlier generic force-directed NetworkX graph with a curated concept map built from concept labels and cluster-aware positioning.",
+                "The updated design adds explicit explanations for node size, node color, and edge meaning, and it uses a side legend plus cluster envelopes to create a more VOSviewer-like field map.",
             ],
-            interpretation=[
-                "Clusters often represent broad AhR branches such as toxicology, immunology, microbiome/barrier biology, and cancer-related work.",
-                "Absence of an edge should not be interpreted as absence of a biological relationship; it only means the term pair did not survive readability-oriented thresholds.",
+            threshold_notes=[
+                "Concept labels had to appear in at least 140 papers to be eligible, and the map was capped at the 42 most prevalent retained concepts.",
+                "Edges were retained only when at least 26 papers carried the concept pair and the association-strength weight was at least 0.11.",
             ],
         ),
-        render_network(
+        "figure_05_keyword_network_immune_barrier_microbiome": lambda: render_concept_map(
             summary,
             nodes_file="network_focus_nodes.csv",
             edges_file="network_focus_edges.csv",
+            clusters_file="network_focus_clusters.csv",
             stem="figure_05_keyword_network_immune_barrier_microbiome",
-            title="Figure 05. Immune-barrier-microbiome AhR term network",
-            purpose="Focuses the co-occurrence map on the thesis-relevant immune, barrier, gut, and microbiome-oriented subset of AhR papers.",
-            thresholds=[
-                "Subset defined by immune, inflammation, microbiome, barrier, gut, or intestinal focus tags.",
-                "Lower minimum term and edge thresholds were used than in the all-corpus network to preserve structure within the smaller subset.",
+            title="Immune-Microbiome-Barrier AhR Sublandscape",
+            subtitle="Focused concept map of the microbiome, gut, mucosal, inflammatory, and immunoregulatory AhR literature",
+            purpose="Highlights the thesis-relevant AhR sublandscape spanning microbiome, barrier biology, inflammation, and immune regulation.",
+            subset_note="Only papers carrying immune, microbiome, barrier, inflammation, gut, or intestinal focus tags were used.",
+            changes=[
+                "This figure replaces the earlier weak subnetwork graph with a focused concept map built from a targeted AhR immune-microbiome-barrier subset.",
+                "The updated version removes low-value verbs and uses curated concept labels, explicit legend text, and stronger cluster structure so the figure reads as a coherent subfield map.",
             ],
-            interpretation=[
-                "This view is intended to surface bridges between mucosal biology, host-microbe interactions, inflammation, and immune regulation.",
-                "Because the subset is pattern-based, some relevant papers may be missed if they use unexpected terminology.",
+            threshold_notes=[
+                "Concept labels had to appear in at least 45 papers within the focus subset, and the map was capped at the 36 most prevalent retained concepts.",
+                "Edges were retained only when at least 12 papers carried the concept pair and the association-strength weight was at least 0.11.",
             ],
         ),
-        render_term_evolution(summary),
-        render_cluster_map(summary),
-        render_top_journals(summary),
-    ]
+        "figure_06_thematic_evolution": lambda: render_thematic_evolution(summary),
+        "figure_07_thematic_cluster_map": lambda: render_cluster_map(summary),
+        "figure_08_top_journals": lambda: render_top_journals(summary),
+    }
+    outputs = []
+    for stem, renderer in renderers.items():
+        if include is None or stem in include:
+            outputs.append(renderer())
     return outputs

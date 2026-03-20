@@ -1,7 +1,11 @@
-# Figure 05. Immune-barrier-microbiome AhR term network
+# Immune-Microbiome-Barrier AhR Sublandscape
 
 ## Figure purpose
-Focuses the co-occurrence map on the thesis-relevant immune, barrier, gut, and microbiome-oriented subset of AhR papers.
+Highlights the thesis-relevant AhR sublandscape spanning microbiome, barrier biology, inflammation, and immune regulation.
+
+## Changes from previous version
+- This figure replaces the earlier weak subnetwork graph with a focused concept map built from a targeted AhR immune-microbiome-barrier subset.
+- The updated version removes low-value verbs and uses curated concept labels, explicit legend text, and stronger cluster structure so the figure reads as a coherent subfield map.
 
 ## Input data
 - Corpus: Validated AhR OpenAlex corpus
@@ -12,30 +16,32 @@ Focuses the co-occurrence map on the thesis-relevant immune, barrier, gut, and m
 ## Preprocessing
 - English-language articles and reviews were retained.
 - Titles, available abstracts, OpenAlex keywords, and MeSH descriptors were normalized after corpus retrieval.
-- Title-plus-abstract text was used for the main term-network and clustering analyses after broader metadata trials produced noisier concept maps.
+- Disease/application tagging still uses broad metadata support, but the upgraded landscape figures use curated concept labels derived from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching.
 - Text was lowercased, punctuation-normalized, and harmonized with editable synonym mappings in configs/synonyms.yaml.
-- Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt were removed from term-heavy analyses.
+- Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt plus figure-specific concept exclusions were removed from map-style analyses.
 
 ## Analysis steps
-- A binary term-document matrix was built from normalized title-plus-abstract text after broader metadata trials produced noisier concept maps.
-- Pairwise term co-occurrence counts were computed across papers in the relevant corpus subset.
-- Edges were weighted by an association-strength style normalization using co-occurrence divided by the geometric mean of individual term frequencies.
-- Louvain community detection was used to assign clusters, and a weighted spring layout positioned the network.
+- Concept labels were built from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching rather than raw free-text tokens.
+- Only papers carrying immune, microbiome, barrier, inflammation, gut, or intestinal focus tags were used.
+- Concept co-occurrence was computed at the paper level and weighted by association strength using co-occurrence divided by the geometric mean of individual concept frequencies.
+- Louvain community detection defined thematic clusters, and a cluster-aware force layout positioned nodes to emphasize the separation of conceptual regions.
 
 ## Thresholds and filters
-- Subset defined by immune, inflammation, microbiome, barrier, gut, or intestinal focus tags.
-- Lower minimum term and edge thresholds were used than in the all-corpus network to preserve structure within the smaller subset.
+- Generic or non-informative index terms, demographic labels, and method-heavy concepts were excluded before map construction.
+- Concept labels had to appear in at least 45 papers within the focus subset, and the map was capped at the 36 most prevalent retained concepts.
+- Edges were retained only when at least 12 papers carried the concept pair and the association-strength weight was at least 0.11.
 
 ## Plotting settings
-- Edges are rendered as faint weighted strokes to avoid a hairball effect.
-- Node size scales with document frequency and color indicates Louvain cluster membership.
-- Only the highest-salience labels are shown directly to preserve readability.
+- Node size encodes document frequency.
+- Node color encodes cluster assignment.
+- Edge width encodes retained co-occurrence strength.
+- Translucent cluster envelopes and a dedicated side legend panel were added to make the map legible without referring back to the methods.
 
 ## Interpretation notes
-- This view is intended to surface bridges between mucosal biology, host-microbe interactions, inflammation, and immune regulation.
-- Because the subset is pattern-based, some relevant papers may be missed if they use unexpected terminology.
+- This figure should be read as a conceptual landscape of the AhR field rather than as a comprehensive display of every detectable term.
+- Clusters summarize high-salience thematic neighborhoods and the bridging edges between them.
 
 ## Caveats
 - The corpus favors precision over total recall because ambiguous plain-AHR abstracts were not retrieved exhaustively.
-- OpenAlex abstract coverage is incomplete, so title-only records remain in the corpus when they pass conservative validation.
+- OpenAlex abstract coverage is incomplete, so concept-map coverage partly depends on keyword and MeSH richness rather than abstract availability alone.
 - Dictionary-tagged disease/application assignments are approximate, multi-label, and sensitive to the editable regex dictionary.

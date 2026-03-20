@@ -12,6 +12,11 @@ def main() -> None:
         choices=["fetch", "preprocess", "analyze", "figures", "all"],
         help="Pipeline stage to run.",
     )
+    parser.add_argument(
+        "--include",
+        nargs="*",
+        help="Optional figure stems to render when command=figures.",
+    )
     args = parser.parse_args()
 
     if args.command == "fetch":
@@ -21,7 +26,8 @@ def main() -> None:
     elif args.command == "analyze":
         analyze_data()
     elif args.command == "figures":
-        render_figures()
+        include = set(args.include) if args.include else None
+        render_figures(include=include)
     elif args.command == "all":
         run_all()
 
