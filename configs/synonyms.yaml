@@ -1,0 +1,52 @@
+normalizations:
+  tumour: "tumor"
+  tumours: "tumors"
+  signalling: "signaling"
+  microbiota: "microbiome"
+  commensals: "commensal"
+  intestines: "intestinal"
+aliases:
+  AhR:
+    - "ahr"
+    - "ah receptor"
+    - "aryl hydrocarbon receptor"
+    - "aryl-hydrocarbon receptor"
+    - "dioxin receptor"
+  colorectal cancer:
+    - "crc"
+    - "colon cancer"
+    - "colonic cancer"
+    - "colorectal carcinoma"
+    - "colorectal tumour"
+    - "colorectal tumor"
+  inflammatory bowel disease:
+    - "ibd"
+    - "crohn disease"
+    - "crohn's disease"
+    - "ulcerative colitis"
+  tumor immunity:
+    - "tumour immunity"
+    - "cancer immunity"
+    - "anti tumor immunity"
+    - "anti-tumor immunity"
+    - "antitumor immunity"
+  barrier function:
+    - "epithelial barrier"
+    - "intestinal barrier"
+    - "gut barrier"
+    - "mucosal barrier"
+  microbiome:
+    - "microbiota"
+    - "gut microbiome"
+    - "gut microbiota"
+    - "intestinal microbiome"
+  skin disease:
+    - "dermatitis"
+    - "atopic dermatitis"
+    - "eczema"
+    - "psoriasis"
+  liver disease:
+    - "hepatic disease"
+    - "fatty liver disease"
+    - "steatotic liver disease"
+
