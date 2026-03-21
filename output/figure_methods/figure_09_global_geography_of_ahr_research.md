@@ -1,7 +1,7 @@
 # Global Geography of AhR Research
 
 ## Figure purpose
-Shows where AhR research is produced globally and which broad AhR themes are relatively emphasized in leading countries.
+Shows where AhR research is produced globally using a clean bubble-map view of raw output and per-capita output.
 
 ## Input data
 - Corpus: Validated AhR OpenAlex corpus
@@ -19,26 +19,24 @@ Shows where AhR research is produced globally and which broad AhR themes are rel
 ## Analysis steps
 - Country attribution used the OpenAlex `authorships.countries` metadata already captured in the processed `countries` field.
 - Each paper was fractionally counted across all unique countries represented on the paper, so a paper with authors from four countries contributed 0.25 to each country.
-- Broad geography themes were derived from the existing `focus_tags` and `disease_tags` framework and grouped into Toxicology / xenobiotics, Cancer, Immune / inflammation, Microbiome / barrier, and Liver / metabolism to keep the geography layer aligned with the existing thesis figures while avoiding a fragmented legend.
-- Country-level theme shares were computed as the fractional count of papers carrying a theme divided by the country's total fractional AhR paper count.
-- Country names were normalized by joining the ISO alpha-2 codes in the corpus to Natural Earth country names, with small display-name overrides for common thesis labels such as United States, United Kingdom, South Korea, Taiwan, and Czech Republic.
-- World boundaries were drawn from the cached Natural Earth 1:110m country GeoJSON joined by ISO alpha-2 country code.
+- Panel A plots total fractional AhR paper output per country.
+- Panel B normalizes the same fractional AhR paper counts by country population using the Natural Earth `POP_EST` value and expresses the result as fractional AhR papers per million inhabitants.
+- Country names and map positions were normalized by joining ISO alpha-2 country codes to the cached Natural Earth 1:110m country boundary file.
 
 ## Thresholds and filters
-- All countries with valid metadata were included in the choropleth panel.
-- The heatmap panel was limited to the twelve countries with the largest fractional AhR output among countries with at least 40 fractional papers.
-- Only the eight largest producing countries were labeled directly on the map to avoid crowding.
-- Theme shares are non-exclusive because one paper can contribute to more than one broad theme category.
+- All countries with valid metadata were eligible for display in the raw-output bubble map.
+- Countries with missing or non-positive Natural Earth population estimates were omitted from the per-capita normalization panel.
+- Only the top 12 countries by raw output and the top 8 countries by per-capita output among countries with at least 25 fractional papers were labeled directly on the maps to avoid crowding.
 
 ## Plotting settings
-- Panel A uses a muted sequential choropleth where country color encodes fractional AhR paper count.
-- Panel B uses a side heatmap where color intensity encodes the within-country share of papers assigned to each broad theme.
-- Top-producing countries were selectively labeled on the map, with manual offsets for crowded regions.
+- Both panels use a light gray world basemap with minimal borders and semi-transparent single-color bubbles.
+- Bubble area, not color, carries the quantitative encoding in both panels.
+- A small bubble-size legend was added to each panel to make the counting scale explicit.
 - The figure was exported as PNG, PDF, and SVG at 400 dpi for thesis use.
 
 ## Interpretation notes
-- The choropleth shows that AhR research output is globally distributed but strongly concentrated in a limited set of countries.
-- The heatmap is intended to show relative thematic emphasis within countries rather than exclusive specialization or absolute volume.
+- The left map emphasizes absolute country output in the AhR field.
+- The right map emphasizes relative research intensity after population normalization and can elevate smaller countries with disproportionately strong AhR activity.
 
 ## Caveats
 - The corpus favors precision over total recall because ambiguous plain-AHR abstracts were not retrieved exhaustively.
@@ -46,4 +44,4 @@ Shows where AhR research is produced globally and which broad AhR themes are rel
 - Dictionary-tagged disease/application assignments are approximate, multi-label, and sensitive to the editable regex dictionary.
 - Geographic attribution depends on country metadata being present in OpenAlex authorships; papers lacking country metadata are excluded from the geography figure.
 - Fractional counting reduces collaboration-driven overcounting, but it does not distinguish first-author, corresponding-author, or senior-author leadership.
-- Country theme shares should not be read as mutually exclusive compositions because the underlying disease and focus tags are multi-label.
+- Per-capita normalization uses Natural Earth population estimates and can be unstable for very small countries, which is why direct labeling in the per-capita panel is restricted to countries with at least 25 fractional papers.

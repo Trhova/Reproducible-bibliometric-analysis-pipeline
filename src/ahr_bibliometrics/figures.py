@@ -50,6 +50,16 @@ COUNTRY_LABEL_OFFSETS = {
     "FR": (-4, -4),
     "SE": (6, 4),
 }
+COUNTRY_LABEL_OFFSETS_PER_CAPITA = {
+    "US": (0, -4),
+    "CA": (-8, 6),
+    "SE": (8, 8),
+    "FI": (18, 2),
+    "NO": (0, -6),
+    "CZ": (0, 12),
+    "CH": (0, -10),
+    "TW": (12, -2),
+}
 COUNTRY_NAME_OVERRIDES = {
     "US": "United States",
     "GB": "United Kingdom",
@@ -880,11 +890,8 @@ def render_top_journals(summary: dict) -> dict:
 
 def render_global_geography(summary: dict) -> dict:
     country_activity = pd.read_csv(TABLE_DIR / "country_activity.csv")
-    country_theme = pd.read_csv(TABLE_DIR / "country_theme_profiles.csv")
     geography_summary = json.loads((TABLE_DIR / "geography_summary.json").read_text(encoding="utf-8"))
     features = _load_world_features()
-    theme_order = list(GEOGRAPHY_THEME_PALETTE.keys())
-
     counts = dict(zip(country_activity["country"], country_activity["fractional_papers"], strict=False))
     feature_records = []
     for feature in features:
@@ -911,6 +918,7 @@ def render_global_geography(summary: dict) -> dict:
             {
                 "iso2": iso2,
                 "name": name,
+                "properties": properties,
                 "polygons": polygons,
                 "area_score": area_score,
                 "label_point": label_point,
@@ -918,208 +926,207 @@ def render_global_geography(summary: dict) -> dict:
         )
 
     selected_by_code: dict[str, dict] = {}
-    uncoded_records = []
     for record in feature_records:
         iso2 = record["iso2"]
         if not iso2:
-            uncoded_records.append(record)
             continue
         if iso2 not in selected_by_code or record["area_score"] > selected_by_code[iso2]["area_score"]:
             selected_by_code[iso2] = record
-    plot_records = uncoded_records + list(selected_by_code.values())
+    plot_records = list(selected_by_code.values())
 
-    country_name_map: dict[str, str] = {}
-    label_points: dict[str, tuple[float, float]] = {}
-    data_patches = []
-    data_values = []
-    nodata_patches = []
+    basemap_patches = []
     for record in plot_records:
-        iso2 = record["iso2"]
-        if iso2:
-            country_name_map[iso2] = record["name"]
-            label_points[iso2] = record["label_point"]
-        if iso2 in counts:
-            value = float(counts[iso2])
-            for coords in record["polygons"]:
-                data_patches.append(Polygon(coords, closed=True))
-                data_values.append(value)
-        else:
-            for coords in record["polygons"]:
-                nodata_patches.append(Polygon(coords, closed=True))
+        for coords in record["polygons"]:
+            basemap_patches.append(Polygon(coords, closed=True))
 
-    top_heat = country_activity.loc[country_activity["fractional_papers"] >= 40].head(12).copy()
-    top_codes = top_heat["country"].tolist()
-    heat = (
-        country_theme[country_theme["country"].isin(top_codes)]
-        .pivot(index="country", columns="theme_group", values="share_within_country")
-        .reindex(index=top_codes, columns=theme_order)
-        .fillna(0)
+    country_rows = []
+    for iso2, record in selected_by_code.items():
+        if iso2 not in counts:
+            continue
+        label_x, label_y = record["label_point"]
+        country_rows.append(
+            {
+                "country": iso2,
+                "country_name": record["name"],
+                "label_x": label_x,
+                "label_y": label_y,
+                "fractional_papers": float(counts[iso2]),
+                "population": float(record["properties"]["POP_EST"]) if record["properties"].get("POP_EST") else np.nan,
+            }
+        )
+    country_points = pd.DataFrame(country_rows)
+    country_points["per_million"] = country_points["fractional_papers"] / (country_points["population"] / 1_000_000)
+    country_points = country_points.replace([np.inf, -np.inf], np.nan)
+    raw_codes = country_points.sort_values("fractional_papers", ascending=False).head(12)["country"].tolist()
+    per_capita_codes = (
+        country_points[country_points["fractional_papers"] >= 25]
+        .sort_values("per_million", ascending=False)
+        .head(8)["country"]
+        .tolist()
     )
-    heat.index = [
-        country_name_map.get(code, COUNTRY_NAME_OVERRIDES.get(code, code))
-        for code in top_codes
-    ]
 
-    set_plot_style()
-    fig = plt.figure(figsize=(15.2, 8.6))
-    gs = fig.add_gridspec(1, 2, width_ratios=[1.65, 1.0], wspace=0.12)
-    ax_map = fig.add_subplot(gs[0, 0])
-    ax_heat = fig.add_subplot(gs[0, 1])
+    def bubble_sizes(values: pd.Series, min_size: float = 8.0, max_size: float = 1700.0) -> np.ndarray:
+        arr = values.to_numpy(dtype=float)
+        arr = np.clip(arr, a_min=0, a_max=None)
+        if len(arr) == 0 or np.nanmax(arr) <= 0:
+            return np.asarray([])
+        root = np.sqrt(arr)
+        low = float(np.nanmin(root))
+        high = float(np.nanmax(root))
+        if np.isclose(low, high):
+            return np.full_like(arr, (min_size + max_size) / 2.0)
+        scaled = np.interp(root, [low, high], [min_size, max_size])
+        return scaled
 
-    if nodata_patches:
-        ax_map.add_collection(
+    def size_handles(values: list[float], series: pd.Series) -> list:
+        scaled = bubble_sizes(pd.Series(values + series.tolist()))
+        handle_sizes = scaled[: len(values)]
+        return [
+            plt.scatter([], [], s=size, facecolor=BASE_COLORS["ochre"], edgecolor=BASE_COLORS["brick"], alpha=0.42, linewidth=0.6)
+            for size in handle_sizes
+        ]
+
+    def draw_basemap(ax: plt.Axes) -> None:
+        ax.add_collection(
             PatchCollection(
-                nodata_patches,
-                facecolor="#EEE8DD",
+                [Polygon(p.get_xy(), closed=True) for p in basemap_patches],
+                facecolor="#ECE8E0",
                 edgecolor="#D8D0C2",
                 linewidths=0.35,
                 zorder=0,
             )
         )
-    if data_patches:
-        norm = mpl.colors.LogNorm(vmin=max(min(data_values), 1.0), vmax=max(data_values))
-        choropleth = PatchCollection(
-            data_patches,
-            cmap=sns.light_palette(BASE_COLORS["teal"], as_cmap=True),
-            norm=norm,
-            edgecolor="#FBF9F4",
-            linewidths=0.35,
-            zorder=1,
-        )
-        choropleth.set_array(np.asarray(data_values))
-        ax_map.add_collection(choropleth)
-        cbar = fig.colorbar(choropleth, ax=ax_map, fraction=0.04, pad=0.02, shrink=0.82)
-        cbar.set_label("Fractional AhR papers", fontsize=10.2)
-        cbar.outline.set_visible(False)
-    ax_map.set_xlim(-170, 190)
-    ax_map.set_ylim(-58, 85)
-    ax_map.set_xticks([])
-    ax_map.set_yticks([])
-    for spine in ax_map.spines.values():
-        spine.set_visible(False)
-    ax_map.set_title("Global Geography of AhR Research", loc="left", pad=14)
-    ax_map.text(
-        0.0,
-        1.01,
-        "Country shading shows fractional paper output across all represented author-affiliation countries.",
-        transform=ax_map.transAxes,
-        fontsize=10.2,
-        color=BASE_COLORS["slate"],
-    )
-    ax_map.text(
-        0.01,
-        0.03,
-        f"Country metadata available for {geography_summary['n_papers_with_country_metadata']:,} of {summary['n_papers']:,} papers ({geography_summary['country_metadata_coverage']:.0%}).",
-        transform=ax_map.transAxes,
-        fontsize=9.1,
-        color=BASE_COLORS["slate"],
-        ha="left",
-    )
+        ax.set_xlim(-170, 190)
+        ax.set_ylim(-58, 85)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_visible(False)
 
-    top_map = country_activity.head(8)
-    for _, row in top_map.iterrows():
-        code = row["country"]
-        if code not in label_points:
-            continue
-        x, y = label_points[code]
-        dx, dy = COUNTRY_LABEL_OFFSETS.get(code, (0, 0))
-        ax_map.text(
-            x + dx,
-            y + dy,
-            country_name_map.get(code, COUNTRY_NAME_OVERRIDES.get(code, code)),
+    def draw_panel(
+        ax: plt.Axes,
+        value_col: str,
+        panel_title: str,
+        panel_subtitle: str,
+        label_codes: list[str],
+        legend_values: list[float],
+        legend_title: str,
+        label_offsets: dict[str, tuple[int, int]],
+    ) -> None:
+        draw_basemap(ax)
+        panel_df = country_points.dropna(subset=[value_col]).copy()
+        sizes = bubble_sizes(panel_df[value_col], min_size=10, max_size=1750)
+        ax.scatter(
+            panel_df["label_x"],
+            panel_df["label_y"],
+            s=sizes,
+            facecolor=BASE_COLORS["ochre"],
+            edgecolor=BASE_COLORS["brick"],
+            linewidth=0.6,
+            alpha=0.42,
+            zorder=2,
+        )
+        ax.set_title(panel_title, loc="left", pad=12)
+        ax.text(
+            0.0,
+            1.01,
+            panel_subtitle,
+            transform=ax.transAxes,
+            fontsize=10.0,
+            color=BASE_COLORS["slate"],
+        )
+        for _, row in panel_df[panel_df["country"].isin(label_codes)].iterrows():
+            dx, dy = label_offsets.get(row["country"], (0, 0))
+            ax.text(
+                row["label_x"] + dx,
+                row["label_y"] + dy,
+                row["country_name"],
+                fontsize=8.5,
+                ha="center",
+                va="center",
+                bbox={"boxstyle": "round,pad=0.15", "fc": "#FBF9F4", "ec": "none", "alpha": 0.85},
+                zorder=3,
+            )
+        handles = size_handles(legend_values, panel_df[value_col])
+        labels = [f"{value:,.0f}" if value >= 10 else f"{value:.1f}" for value in legend_values]
+        legend = ax.legend(
+            handles,
+            labels,
+            title=legend_title,
+            loc="lower left",
+            bbox_to_anchor=(0.01, 0.02),
+            frameon=False,
+            labelspacing=1.2,
+            handletextpad=1.1,
             fontsize=8.8,
-            ha="center",
-            va="center",
-            bbox={"boxstyle": "round,pad=0.16", "fc": "#FBF9F4", "ec": "none", "alpha": 0.86},
-            zorder=3,
+            title_fontsize=9.1,
         )
 
-    heat_display_labels = {
-        "Toxicology / xenobiotics": "Toxicology /\nxenobiotics",
-        "Cancer": "Cancer",
-        "Immune / inflammation": "Immune /\ninflammation",
-        "Microbiome / barrier": "Microbiome /\nbarrier",
-        "Liver / metabolism": "Liver /\nmetabolism",
-    }
-    sns.heatmap(
-        heat,
-        cmap=sns.light_palette(BASE_COLORS["brick"], as_cmap=True),
-        vmin=0,
-        vmax=max(float(heat.to_numpy().max()), 0.6),
-        linewidths=0.8,
-        linecolor="#E2DDD2",
-        annot=True,
-        fmt=".0%",
-        cbar_kws={"label": "Share of country's AhR papers"},
-        ax=ax_heat,
+    set_plot_style()
+    fig = plt.figure(figsize=(16.2, 8.4))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1], wspace=0.08)
+    ax_raw = fig.add_subplot(gs[0, 0])
+    ax_pc = fig.add_subplot(gs[0, 1])
+
+    draw_panel(
+        ax_raw,
+        value_col="fractional_papers",
+        panel_title="Global AhR Research Output",
+        panel_subtitle="Bubble area shows fractional AhR paper count by country.",
+        label_codes=raw_codes,
+        legend_values=[50, 250, 1000],
+        legend_title="Fractional AhR papers\n(all-country counting)",
+        label_offsets=COUNTRY_LABEL_OFFSETS,
     )
-    ax_heat.set_title("Thematic Emphasis in Leading Countries", loc="left", pad=14)
-    ax_heat.text(
-        0.0,
-        1.01,
-        "Top countries by fractional output; cells show within-country theme shares.",
-        transform=ax_heat.transAxes,
-        fontsize=9.5,
+    draw_panel(
+        ax_pc,
+        value_col="per_million",
+        panel_title="Global AhR Research Output Per Capita",
+        panel_subtitle="Bubble area shows fractional AhR papers per million inhabitants.",
+        label_codes=per_capita_codes,
+        legend_values=[2, 6, 12],
+        legend_title="Fractional AhR papers\nper million inhabitants",
+        label_offsets=COUNTRY_LABEL_OFFSETS_PER_CAPITA,
+    )
+
+    fig.text(
+        0.015,
+        0.03,
+        f"Fractional counting distributes each paper across all represented author-affiliation countries. Country metadata available for {geography_summary['n_papers_with_country_metadata']:,} of {summary['n_papers']:,} papers ({geography_summary['country_metadata_coverage']:.0%}).",
+        fontsize=9.2,
         color=BASE_COLORS["slate"],
     )
-    ax_heat.set_xlabel("")
-    ax_heat.set_ylabel("")
-    ax_heat.set_xticklabels([heat_display_labels.get(label, label) for label in heat.columns], rotation=0)
-    ax_heat.tick_params(axis="x", labelsize=10.0)
-    ax_heat.tick_params(axis="y", rotation=0, labelsize=9.6)
-    for tick in ax_heat.get_xticklabels():
-        label = tick.get_text().replace("\n", " ").replace("  ", " ")
-        for theme, display in heat_display_labels.items():
-            if tick.get_text() == display:
-                tick.set_color(GEOGRAPHY_THEME_PALETTE[theme])
-                break
-        else:
-            if label in GEOGRAPHY_THEME_PALETTE:
-                tick.set_color(GEOGRAPHY_THEME_PALETTE[label])
-        tick.set_fontweight("semibold")
-    ax_heat.text(
-        0.0,
-        -0.10,
-        "Rows are ordered by fractional country output. Heatmap intensity reflects the within-country share of papers carrying each broad theme.",
-        transform=ax_heat.transAxes,
-        fontsize=9.0,
-        color=BASE_COLORS["slate"],
-        va="top",
-    )
-    fig.subplots_adjust(bottom=0.15)
 
     save_figure(fig, "figure_09_global_geography_of_ahr_research")
     metadata = _methods_common(summary) | {
         "title": "Global Geography of AhR Research",
-        "purpose": "Shows where AhR research is produced globally and which broad AhR themes are relatively emphasized in leading countries.",
+        "purpose": "Shows where AhR research is produced globally using a clean bubble-map view of raw output and per-capita output.",
         "analysis_steps": [
             "Country attribution used the OpenAlex `authorships.countries` metadata already captured in the processed `countries` field.",
             "Each paper was fractionally counted across all unique countries represented on the paper, so a paper with authors from four countries contributed 0.25 to each country.",
-            "Broad geography themes were derived from the existing `focus_tags` and `disease_tags` framework and grouped into Toxicology / xenobiotics, Cancer, Immune / inflammation, Microbiome / barrier, and Liver / metabolism to keep the geography layer aligned with the existing thesis figures while avoiding a fragmented legend.",
-            "Country-level theme shares were computed as the fractional count of papers carrying a theme divided by the country's total fractional AhR paper count.",
-            "Country names were normalized by joining the ISO alpha-2 codes in the corpus to Natural Earth country names, with small display-name overrides for common thesis labels such as United States, United Kingdom, South Korea, Taiwan, and Czech Republic.",
-            "World boundaries were drawn from the cached Natural Earth 1:110m country GeoJSON joined by ISO alpha-2 country code.",
+            "Panel A plots total fractional AhR paper output per country.",
+            "Panel B normalizes the same fractional AhR paper counts by country population using the Natural Earth `POP_EST` value and expresses the result as fractional AhR papers per million inhabitants.",
+            "Country names and map positions were normalized by joining ISO alpha-2 country codes to the cached Natural Earth 1:110m country boundary file.",
         ],
         "thresholds": [
-            "All countries with valid metadata were included in the choropleth panel.",
-            "The heatmap panel was limited to the twelve countries with the largest fractional AhR output among countries with at least 40 fractional papers.",
-            "Only the eight largest producing countries were labeled directly on the map to avoid crowding.",
-            "Theme shares are non-exclusive because one paper can contribute to more than one broad theme category.",
+            "All countries with valid metadata were eligible for display in the raw-output bubble map.",
+            "Countries with missing or non-positive Natural Earth population estimates were omitted from the per-capita normalization panel.",
+            "Only the top 12 countries by raw output and the top 8 countries by per-capita output among countries with at least 25 fractional papers were labeled directly on the maps to avoid crowding.",
         ],
         "plotting": [
-            "Panel A uses a muted sequential choropleth where country color encodes fractional AhR paper count.",
-            "Panel B uses a side heatmap where color intensity encodes the within-country share of papers assigned to each broad theme.",
-            "Top-producing countries were selectively labeled on the map, with manual offsets for crowded regions.",
+            "Both panels use a light gray world basemap with minimal borders and semi-transparent single-color bubbles.",
+            "Bubble area, not color, carries the quantitative encoding in both panels.",
+            "A small bubble-size legend was added to each panel to make the counting scale explicit.",
             "The figure was exported as PNG, PDF, and SVG at 400 dpi for thesis use.",
         ],
         "interpretation": [
-            "The choropleth shows that AhR research output is globally distributed but strongly concentrated in a limited set of countries.",
-            "The heatmap is intended to show relative thematic emphasis within countries rather than exclusive specialization or absolute volume.",
+            "The left map emphasizes absolute country output in the AhR field.",
+            "The right map emphasizes relative research intensity after population normalization and can elevate smaller countries with disproportionately strong AhR activity.",
         ],
         "caveats": _methods_common(summary)["caveats"] + [
             "Geographic attribution depends on country metadata being present in OpenAlex authorships; papers lacking country metadata are excluded from the geography figure.",
             "Fractional counting reduces collaboration-driven overcounting, but it does not distinguish first-author, corresponding-author, or senior-author leadership.",
-            "Country theme shares should not be read as mutually exclusive compositions because the underlying disease and focus tags are multi-label.",
+            "Per-capita normalization uses Natural Earth population estimates and can be unstable for very small countries, which is why direct labeling in the per-capita panel is restricted to countries with at least 25 fractional papers.",
         ],
     }
     write_methods_file(METHODS_DIR / "figure_09_global_geography_of_ahr_research.md", metadata)
