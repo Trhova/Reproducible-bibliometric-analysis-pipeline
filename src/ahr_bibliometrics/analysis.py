@@ -270,6 +270,29 @@ THEME_PROFILES = {
     },
 }
 
+GEOGRAPHY_THEME_GROUPS = {
+    "Toxicology / xenobiotics": {
+        "focus_tags": {"toxicology"},
+        "disease_tags": {"Toxicology / xenobiotics"},
+    },
+    "Cancer": {
+        "focus_tags": {"cancer"},
+        "disease_tags": {"Cancer"},
+    },
+    "Immune / inflammation": {
+        "focus_tags": {"immune", "inflammation"},
+        "disease_tags": {"Immune regulation / inflammation"},
+    },
+    "Microbiome / barrier": {
+        "focus_tags": {"microbiome", "barrier"},
+        "disease_tags": {"Microbiome / host-microbe", "Mucosal / barrier biology", "Inflammatory bowel disease"},
+    },
+    "Liver / metabolism": {
+        "focus_tags": {"metabolism"},
+        "disease_tags": {"Liver disease", "Metabolic disease"},
+    },
+}
+
 
 def _analysis_stopwords(stopwords: set[str]) -> list[str]:
     return sorted(set(stopwords) | set(ENGLISH_STOP_WORDS))
@@ -392,6 +415,15 @@ def _deduplicate_cluster_labels(cluster_summary: pd.DataFrame) -> pd.DataFrame:
             elif label == "Cancer and hormone signaling" and terms & {"cyp1a1", "cyp1b1"}:
                 updated.at[idx, "cluster_label"] = "CYP1-cancer signaling interface"
     return updated
+
+
+def _geography_theme_flags(row: pd.Series) -> dict[str, bool]:
+    focus_tags = set(parse_pipe_list(row.get("focus_tags", "")))
+    disease_tags = set(parse_pipe_list(row.get("disease_tags", "")))
+    return {
+        theme: bool(focus_tags & spec["focus_tags"] or disease_tags & spec["disease_tags"])
+        for theme, spec in GEOGRAPHY_THEME_GROUPS.items()
+    }
 
 
 def _concept_documents(works: pd.DataFrame) -> tuple[list[list[str]], list[str]]:
@@ -718,6 +750,71 @@ def build_journal_table(works: pd.DataFrame) -> pd.DataFrame:
     return journal
 
 
+def build_geography_tables(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    country_rows = []
+    country_theme_rows = []
+    n_with_country = 0
+    for _, row in works.iterrows():
+        countries = sorted(set(parse_pipe_list(row.get("countries", ""))))
+        if not countries:
+            continue
+        n_with_country += 1
+        weight = 1.0 / len(countries)
+        theme_flags = _geography_theme_flags(row)
+        for country in countries:
+            country_rows.append(
+                {
+                    "work_id": row["id"],
+                    "country": country,
+                    "fractional_papers": weight,
+                }
+            )
+            for theme, matched in theme_flags.items():
+                if matched:
+                    country_theme_rows.append(
+                        {
+                            "work_id": row["id"],
+                            "country": country,
+                            "theme_group": theme,
+                            "fractional_theme_papers": weight,
+                        }
+                    )
+
+    country_activity = (
+        pd.DataFrame(country_rows)
+        .groupby("country", as_index=False)
+        .agg(
+            fractional_papers=("fractional_papers", "sum"),
+            n_unique_papers=("work_id", "nunique"),
+        )
+        .sort_values("fractional_papers", ascending=False)
+    )
+    if country_theme_rows:
+        country_theme = (
+            pd.DataFrame(country_theme_rows)
+            .groupby(["country", "theme_group"], as_index=False)
+            .agg(
+                fractional_theme_papers=("fractional_theme_papers", "sum"),
+                n_theme_papers=("work_id", "nunique"),
+            )
+        )
+        country_theme = country_theme.merge(country_activity[["country", "fractional_papers"]], on="country", how="left")
+        country_theme["share_within_country"] = country_theme["fractional_theme_papers"] / country_theme["fractional_papers"]
+    else:
+        country_theme = pd.DataFrame(
+            columns=["country", "theme_group", "fractional_theme_papers", "n_theme_papers", "fractional_papers", "share_within_country"]
+        )
+
+    geography_summary = {
+        "n_papers_with_country_metadata": int(n_with_country),
+        "country_metadata_coverage": float(n_with_country / max(len(works), 1)),
+        "n_countries_with_activity": int(country_activity["country"].nunique()),
+        "fractional_counting": True,
+        "theme_groups": list(GEOGRAPHY_THEME_GROUPS.keys()),
+    }
+    return country_activity, country_theme, geography_summary
+
+
 def write_analysis_outputs(works: pd.DataFrame, stopwords: set[str]) -> dict:
     TABLE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -750,6 +847,11 @@ def write_analysis_outputs(works: pd.DataFrame, stopwords: set[str]) -> dict:
     journals = build_journal_table(works)
     journals.to_csv(TABLE_DIR / "top_journals.csv", index=False)
 
+    country_activity, country_theme, geography_summary = build_geography_tables(works)
+    country_activity.to_csv(TABLE_DIR / "country_activity.csv", index=False)
+    country_theme.to_csv(TABLE_DIR / "country_theme_profiles.csv", index=False)
+    save_json(TABLE_DIR / "geography_summary.json", geography_summary)
+
     summary = {
         "n_papers": int(works["id"].nunique()),
         "year_min": int(works["publication_year"].min()),
@@ -758,6 +860,8 @@ def write_analysis_outputs(works: pd.DataFrame, stopwords: set[str]) -> dict:
         "n_countries": int(
             len({country for countries in works["countries"].fillna("") for country in parse_pipe_list(countries)})
         ),
+        "n_papers_with_country_metadata": geography_summary["n_papers_with_country_metadata"],
+        "country_metadata_coverage": geography_summary["country_metadata_coverage"],
     }
     save_json(TABLE_DIR / "analysis_summary.json", summary)
     return summary

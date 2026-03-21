@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from datetime import date
+import json
+from pathlib import Path as FilePath
+from urllib.request import Request, urlopen
+from matplotlib.collections import PatchCollection
 from matplotlib.lines import Line2D
-from matplotlib.patches import Ellipse, PathPatch, Rectangle
+from matplotlib.patches import Ellipse, PathPatch, Polygon, Rectangle
 from matplotlib.path import Path
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -10,7 +14,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from .config import FIGURE_DIR, METHODS_DIR, TABLE_DIR
+from .config import FIGURE_DIR, METHODS_DIR, RAW_DIR, TABLE_DIR
 from .methods import write_methods_file
 
 
@@ -26,6 +30,33 @@ BASE_COLORS = {
     "sand": "#D8CCB4",
 }
 NETWORK_PALETTE = ["#A44A3F", "#C08A3E", "#5F8F7A", "#377D86", "#60708B", "#8A5E7B", "#8290A4", "#A3B18A"]
+GEOGRAPHY_THEME_PALETTE = {
+    "Toxicology / xenobiotics": "#A44A3F",
+    "Cancer": "#C08A3E",
+    "Immune / inflammation": "#377D86",
+    "Microbiome / barrier": "#5F8F7A",
+    "Liver / metabolism": "#60708B",
+}
+WORLD_GEOJSON_URL = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson"
+COUNTRY_LABEL_OFFSETS = {
+    "US": (0, -4),
+    "CN": (8, -2),
+    "JP": (10, 0),
+    "DE": (2, -2),
+    "CA": (-8, 6),
+    "KR": (10, -1),
+    "TW": (12, -2),
+    "GB": (-8, 2),
+    "FR": (-4, -4),
+    "SE": (6, 4),
+}
+COUNTRY_NAME_OVERRIDES = {
+    "US": "United States",
+    "GB": "United Kingdom",
+    "KR": "South Korea",
+    "TW": "Taiwan",
+    "CZ": "Czech Republic",
+}
 
 
 def set_plot_style() -> None:
@@ -55,6 +86,56 @@ def save_figure(fig: plt.Figure, stem: str) -> None:
     for ext in FIGURE_FORMATS:
         fig.savefig(FIGURE_DIR / f"{stem}.{ext}", dpi=400, bbox_inches="tight")
     plt.close(fig)
+
+
+def _world_geojson_path() -> FilePath:
+    return RAW_DIR / "reference" / "ne_110m_admin_0_countries.geojson"
+
+
+def _ensure_world_geojson() -> FilePath:
+    path = _world_geojson_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        return path
+    request = Request(WORLD_GEOJSON_URL, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(request, timeout=60) as response:
+        payload = response.read().decode("utf-8")
+    path.write_text(payload, encoding="utf-8")
+    return path
+
+
+def _load_world_features() -> list[dict]:
+    path = _ensure_world_geojson()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return payload["features"]
+
+
+def _feature_iso2(properties: dict) -> str | None:
+    for key in ["ISO_A2", "ISO_A2_EH", "WB_A2", "POSTAL"]:
+        value = str(properties.get(key) or "").strip()
+        if len(value) == 2 and value != "-99":
+            return value
+    return None
+
+
+def _feature_name(properties: dict, iso2: str | None) -> str:
+    if iso2 and iso2 in COUNTRY_NAME_OVERRIDES:
+        return COUNTRY_NAME_OVERRIDES[iso2]
+    return str(properties.get("NAME_LONG") or properties.get("ADMIN") or properties.get("NAME") or iso2 or "Unknown")
+
+
+def _iter_feature_polygons(geometry: dict) -> list[np.ndarray]:
+    polygons: list[np.ndarray] = []
+    if not geometry:
+        return polygons
+    if geometry.get("type") == "Polygon":
+        if geometry.get("coordinates"):
+            polygons.append(np.asarray(geometry["coordinates"][0], dtype=float))
+    elif geometry.get("type") == "MultiPolygon":
+        for polygon in geometry.get("coordinates", []):
+            if polygon:
+                polygons.append(np.asarray(polygon[0], dtype=float))
+    return polygons
 
 
 def _methods_common(summary: dict) -> dict:
@@ -797,6 +878,254 @@ def render_top_journals(summary: dict) -> dict:
     return metadata
 
 
+def render_global_geography(summary: dict) -> dict:
+    country_activity = pd.read_csv(TABLE_DIR / "country_activity.csv")
+    country_theme = pd.read_csv(TABLE_DIR / "country_theme_profiles.csv")
+    geography_summary = json.loads((TABLE_DIR / "geography_summary.json").read_text(encoding="utf-8"))
+    features = _load_world_features()
+    theme_order = list(GEOGRAPHY_THEME_PALETTE.keys())
+
+    counts = dict(zip(country_activity["country"], country_activity["fractional_papers"], strict=False))
+    feature_records = []
+    for feature in features:
+        properties = feature.get("properties", {})
+        geometry = feature.get("geometry", {})
+        iso2 = _feature_iso2(properties)
+        name = _feature_name(properties, iso2)
+        if name == "Antarctica":
+            continue
+        polygons = _iter_feature_polygons(geometry)
+        if not polygons:
+            continue
+        area_score = float(
+            sum((coords[:, 0].max() - coords[:, 0].min()) * (coords[:, 1].max() - coords[:, 1].min()) for coords in polygons)
+        )
+        label_x = properties.get("LABEL_X")
+        label_y = properties.get("LABEL_Y")
+        if label_x is not None and label_y is not None:
+            label_point = (float(label_x), float(label_y))
+        else:
+            coords = np.vstack(polygons)
+            label_point = (float(np.nanmean(coords[:, 0])), float(np.nanmean(coords[:, 1])))
+        feature_records.append(
+            {
+                "iso2": iso2,
+                "name": name,
+                "polygons": polygons,
+                "area_score": area_score,
+                "label_point": label_point,
+            }
+        )
+
+    selected_by_code: dict[str, dict] = {}
+    uncoded_records = []
+    for record in feature_records:
+        iso2 = record["iso2"]
+        if not iso2:
+            uncoded_records.append(record)
+            continue
+        if iso2 not in selected_by_code or record["area_score"] > selected_by_code[iso2]["area_score"]:
+            selected_by_code[iso2] = record
+    plot_records = uncoded_records + list(selected_by_code.values())
+
+    country_name_map: dict[str, str] = {}
+    label_points: dict[str, tuple[float, float]] = {}
+    data_patches = []
+    data_values = []
+    nodata_patches = []
+    for record in plot_records:
+        iso2 = record["iso2"]
+        if iso2:
+            country_name_map[iso2] = record["name"]
+            label_points[iso2] = record["label_point"]
+        if iso2 in counts:
+            value = float(counts[iso2])
+            for coords in record["polygons"]:
+                data_patches.append(Polygon(coords, closed=True))
+                data_values.append(value)
+        else:
+            for coords in record["polygons"]:
+                nodata_patches.append(Polygon(coords, closed=True))
+
+    top_heat = country_activity.loc[country_activity["fractional_papers"] >= 40].head(12).copy()
+    top_codes = top_heat["country"].tolist()
+    heat = (
+        country_theme[country_theme["country"].isin(top_codes)]
+        .pivot(index="country", columns="theme_group", values="share_within_country")
+        .reindex(index=top_codes, columns=theme_order)
+        .fillna(0)
+    )
+    heat.index = [
+        country_name_map.get(code, COUNTRY_NAME_OVERRIDES.get(code, code))
+        for code in top_codes
+    ]
+
+    set_plot_style()
+    fig = plt.figure(figsize=(15.2, 8.6))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.65, 1.0], wspace=0.12)
+    ax_map = fig.add_subplot(gs[0, 0])
+    ax_heat = fig.add_subplot(gs[0, 1])
+
+    if nodata_patches:
+        ax_map.add_collection(
+            PatchCollection(
+                nodata_patches,
+                facecolor="#EEE8DD",
+                edgecolor="#D8D0C2",
+                linewidths=0.35,
+                zorder=0,
+            )
+        )
+    if data_patches:
+        norm = mpl.colors.LogNorm(vmin=max(min(data_values), 1.0), vmax=max(data_values))
+        choropleth = PatchCollection(
+            data_patches,
+            cmap=sns.light_palette(BASE_COLORS["teal"], as_cmap=True),
+            norm=norm,
+            edgecolor="#FBF9F4",
+            linewidths=0.35,
+            zorder=1,
+        )
+        choropleth.set_array(np.asarray(data_values))
+        ax_map.add_collection(choropleth)
+        cbar = fig.colorbar(choropleth, ax=ax_map, fraction=0.04, pad=0.02, shrink=0.82)
+        cbar.set_label("Fractional AhR papers", fontsize=10.2)
+        cbar.outline.set_visible(False)
+    ax_map.set_xlim(-170, 190)
+    ax_map.set_ylim(-58, 85)
+    ax_map.set_xticks([])
+    ax_map.set_yticks([])
+    for spine in ax_map.spines.values():
+        spine.set_visible(False)
+    ax_map.set_title("Global Geography of AhR Research", loc="left", pad=14)
+    ax_map.text(
+        0.0,
+        1.01,
+        "Country shading shows fractional paper output across all represented author-affiliation countries.",
+        transform=ax_map.transAxes,
+        fontsize=10.2,
+        color=BASE_COLORS["slate"],
+    )
+    ax_map.text(
+        0.01,
+        0.03,
+        f"Country metadata available for {geography_summary['n_papers_with_country_metadata']:,} of {summary['n_papers']:,} papers ({geography_summary['country_metadata_coverage']:.0%}).",
+        transform=ax_map.transAxes,
+        fontsize=9.1,
+        color=BASE_COLORS["slate"],
+        ha="left",
+    )
+
+    top_map = country_activity.head(8)
+    for _, row in top_map.iterrows():
+        code = row["country"]
+        if code not in label_points:
+            continue
+        x, y = label_points[code]
+        dx, dy = COUNTRY_LABEL_OFFSETS.get(code, (0, 0))
+        ax_map.text(
+            x + dx,
+            y + dy,
+            country_name_map.get(code, COUNTRY_NAME_OVERRIDES.get(code, code)),
+            fontsize=8.8,
+            ha="center",
+            va="center",
+            bbox={"boxstyle": "round,pad=0.16", "fc": "#FBF9F4", "ec": "none", "alpha": 0.86},
+            zorder=3,
+        )
+
+    heat_display_labels = {
+        "Toxicology / xenobiotics": "Toxicology /\nxenobiotics",
+        "Cancer": "Cancer",
+        "Immune / inflammation": "Immune /\ninflammation",
+        "Microbiome / barrier": "Microbiome /\nbarrier",
+        "Liver / metabolism": "Liver /\nmetabolism",
+    }
+    sns.heatmap(
+        heat,
+        cmap=sns.light_palette(BASE_COLORS["brick"], as_cmap=True),
+        vmin=0,
+        vmax=max(float(heat.to_numpy().max()), 0.6),
+        linewidths=0.8,
+        linecolor="#E2DDD2",
+        annot=True,
+        fmt=".0%",
+        cbar_kws={"label": "Share of country's AhR papers"},
+        ax=ax_heat,
+    )
+    ax_heat.set_title("Thematic Emphasis in Leading Countries", loc="left", pad=14)
+    ax_heat.text(
+        0.0,
+        1.01,
+        "Top countries by fractional output; cells show within-country theme shares.",
+        transform=ax_heat.transAxes,
+        fontsize=9.5,
+        color=BASE_COLORS["slate"],
+    )
+    ax_heat.set_xlabel("")
+    ax_heat.set_ylabel("")
+    ax_heat.set_xticklabels([heat_display_labels.get(label, label) for label in heat.columns], rotation=0)
+    ax_heat.tick_params(axis="x", labelsize=10.0)
+    ax_heat.tick_params(axis="y", rotation=0, labelsize=9.6)
+    for tick in ax_heat.get_xticklabels():
+        label = tick.get_text().replace("\n", " ").replace("  ", " ")
+        for theme, display in heat_display_labels.items():
+            if tick.get_text() == display:
+                tick.set_color(GEOGRAPHY_THEME_PALETTE[theme])
+                break
+        else:
+            if label in GEOGRAPHY_THEME_PALETTE:
+                tick.set_color(GEOGRAPHY_THEME_PALETTE[label])
+        tick.set_fontweight("semibold")
+    ax_heat.text(
+        0.0,
+        -0.10,
+        "Rows are ordered by fractional country output. Heatmap intensity reflects the within-country share of papers carrying each broad theme.",
+        transform=ax_heat.transAxes,
+        fontsize=9.0,
+        color=BASE_COLORS["slate"],
+        va="top",
+    )
+    fig.subplots_adjust(bottom=0.15)
+
+    save_figure(fig, "figure_09_global_geography_of_ahr_research")
+    metadata = _methods_common(summary) | {
+        "title": "Global Geography of AhR Research",
+        "purpose": "Shows where AhR research is produced globally and which broad AhR themes are relatively emphasized in leading countries.",
+        "analysis_steps": [
+            "Country attribution used the OpenAlex `authorships.countries` metadata already captured in the processed `countries` field.",
+            "Each paper was fractionally counted across all unique countries represented on the paper, so a paper with authors from four countries contributed 0.25 to each country.",
+            "Broad geography themes were derived from the existing `focus_tags` and `disease_tags` framework and grouped into Toxicology / xenobiotics, Cancer, Immune / inflammation, Microbiome / barrier, and Liver / metabolism to keep the geography layer aligned with the existing thesis figures while avoiding a fragmented legend.",
+            "Country-level theme shares were computed as the fractional count of papers carrying a theme divided by the country's total fractional AhR paper count.",
+            "Country names were normalized by joining the ISO alpha-2 codes in the corpus to Natural Earth country names, with small display-name overrides for common thesis labels such as United States, United Kingdom, South Korea, Taiwan, and Czech Republic.",
+            "World boundaries were drawn from the cached Natural Earth 1:110m country GeoJSON joined by ISO alpha-2 country code.",
+        ],
+        "thresholds": [
+            "All countries with valid metadata were included in the choropleth panel.",
+            "The heatmap panel was limited to the twelve countries with the largest fractional AhR output among countries with at least 40 fractional papers.",
+            "Only the eight largest producing countries were labeled directly on the map to avoid crowding.",
+            "Theme shares are non-exclusive because one paper can contribute to more than one broad theme category.",
+        ],
+        "plotting": [
+            "Panel A uses a muted sequential choropleth where country color encodes fractional AhR paper count.",
+            "Panel B uses a side heatmap where color intensity encodes the within-country share of papers assigned to each broad theme.",
+            "Top-producing countries were selectively labeled on the map, with manual offsets for crowded regions.",
+            "The figure was exported as PNG, PDF, and SVG at 400 dpi for thesis use.",
+        ],
+        "interpretation": [
+            "The choropleth shows that AhR research output is globally distributed but strongly concentrated in a limited set of countries.",
+            "The heatmap is intended to show relative thematic emphasis within countries rather than exclusive specialization or absolute volume.",
+        ],
+        "caveats": _methods_common(summary)["caveats"] + [
+            "Geographic attribution depends on country metadata being present in OpenAlex authorships; papers lacking country metadata are excluded from the geography figure.",
+            "Fractional counting reduces collaboration-driven overcounting, but it does not distinguish first-author, corresponding-author, or senior-author leadership.",
+            "Country theme shares should not be read as mutually exclusive compositions because the underlying disease and focus tags are multi-label.",
+        ],
+    }
+    write_methods_file(METHODS_DIR / "figure_09_global_geography_of_ahr_research.md", metadata)
+    return metadata
+
+
 def render_all_figures(summary: dict, include: set[str] | None = None) -> list[dict]:
     renderers = {
         "figure_01_publications_over_time": lambda: render_publications_over_time(summary),
@@ -843,6 +1172,7 @@ def render_all_figures(summary: dict, include: set[str] | None = None) -> list[d
         "figure_06_thematic_evolution": lambda: render_thematic_evolution(summary),
         "figure_07_thematic_cluster_map": lambda: render_cluster_map(summary),
         "figure_08_top_journals": lambda: render_top_journals(summary),
+        "figure_09_global_geography_of_ahr_research": lambda: render_global_geography(summary),
     }
     outputs = []
     for stem, renderer in renderers.items():
