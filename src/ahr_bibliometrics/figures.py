@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse, PathPatch, Rectangle
 from matplotlib.path import Path
@@ -83,11 +84,45 @@ def _methods_common(summary: dict) -> dict:
 
 def render_publications_over_time(summary: dict) -> dict:
     annual = pd.read_csv(TABLE_DIR / "publication_counts.csv")
+    annual_display = annual.copy()
+    today = date.today()
+    projected_label = None
+    projection_note = None
+    projected_total = None
+    observed_total = None
+    current_year = int(today.year)
+    if current_year in annual_display["publication_year"].values and today < date(current_year, 12, 31):
+        observed_total = int(annual_display.loc[annual_display["publication_year"] == current_year, "publications"].iloc[0])
+        days_elapsed = today.timetuple().tm_yday
+        days_in_year = 366 if date(current_year, 12, 31).timetuple().tm_yday == 366 else 365
+        year_fraction = max(days_elapsed / days_in_year, 1 / days_in_year)
+        projected_total = int(round(observed_total / year_fraction))
+        annual_display.loc[annual_display["publication_year"] == current_year, "publications"] = projected_total
+        annual_display["rolling_mean_3y"] = annual_display["publications"].rolling(3, min_periods=1).mean()
+        annual_display["cumulative_publications"] = annual_display["publications"].cumsum()
+        projected_label = f"{current_year} projected from Jan 1-{today.strftime('%b %d, %Y')}"
+        projection_note = (
+            f"{current_year} observed: {observed_total} papers by {today.strftime('%B %-d, %Y')}; "
+            f"year-end projection: {projected_total}"
+        )
+
     set_plot_style()
     fig, axes = plt.subplots(2, 1, figsize=(11.5, 8), sharex=True, gridspec_kw={"height_ratios": [2.3, 1]})
 
     axes[0].bar(annual["publication_year"], annual["publications"], color=BASE_COLORS["teal"], alpha=0.85, width=0.8)
-    axes[0].plot(annual["publication_year"], annual["rolling_mean_3y"], color=BASE_COLORS["brick"], linewidth=2.4)
+    if projected_total is not None and observed_total is not None and projected_total > observed_total:
+        axes[0].bar(
+            [current_year],
+            [projected_total - observed_total],
+            bottom=[observed_total],
+            color=BASE_COLORS["teal"],
+            alpha=0.20,
+            width=0.8,
+            hatch="///",
+            edgecolor=BASE_COLORS["teal"],
+            linewidth=0.0,
+        )
+    axes[0].plot(annual_display["publication_year"], annual_display["rolling_mean_3y"], color=BASE_COLORS["brick"], linewidth=2.4)
     axes[0].set_ylabel("Publications")
     axes[0].set_title("AhR Literature Growth")
     axes[0].text(
@@ -98,6 +133,22 @@ def render_publications_over_time(summary: dict) -> dict:
         fontsize=10.5,
         color=BASE_COLORS["ink"],
     )
+    if projection_note:
+        axes[0].text(
+            0.99,
+            0.93,
+            projection_note,
+            transform=axes[0].transAxes,
+            fontsize=9.4,
+            color=BASE_COLORS["slate"],
+            ha="right",
+        )
+        legend_items = [
+            Rectangle((0, 0), 1, 1, facecolor=BASE_COLORS["teal"], alpha=0.85, edgecolor="none", label="Observed annual count"),
+            Rectangle((0, 0), 1, 1, facecolor=BASE_COLORS["teal"], alpha=0.20, edgecolor=BASE_COLORS["teal"], hatch="///", label="Projected remainder"),
+            Line2D([0], [0], color=BASE_COLORS["brick"], linewidth=2.4, label="3-year rolling mean"),
+        ]
+        axes[0].legend(handles=legend_items, loc="upper left", bbox_to_anchor=(0.01, 0.84), fontsize=9.2)
 
     axes[1].fill_between(
         annual["publication_year"],
@@ -106,12 +157,23 @@ def render_publications_over_time(summary: dict) -> dict:
         alpha=0.35,
     )
     axes[1].plot(annual["publication_year"], annual["cumulative_publications"], color=BASE_COLORS["ochre"], linewidth=2.2)
+    if projected_total is not None and observed_total is not None:
+        prior_mask = annual["publication_year"] < current_year
+        if prior_mask.any():
+            prior_cumulative = float(annual.loc[prior_mask, "cumulative_publications"].iloc[-1])
+            axes[1].plot(
+                [current_year - 1, current_year],
+                [prior_cumulative, prior_cumulative + projected_total],
+                color=BASE_COLORS["ochre"],
+                linewidth=2.2,
+                linestyle=(0, (4, 3)),
+            )
     axes[1].set_ylabel("Cumulative")
     axes[1].set_xlabel("Publication year")
     axes[1].text(
         0.99,
         0.08,
-        "2026 is a partial year",
+        projected_label or "2026 is a partial year",
         transform=axes[1].transAxes,
         ha="right",
         fontsize=9.5,
@@ -127,6 +189,7 @@ def render_publications_over_time(summary: dict) -> dict:
         "purpose": "Shows annual publication counts and the cumulative growth trajectory of the validated AhR literature.",
         "analysis_steps": [
             "Papers were grouped by publication year.",
+            "For 2026, the observed year-to-date count was annualized from the pipeline run date to estimate a year-end total, and the projected remainder was drawn as a hatched bar segment.",
             "A three-year rolling mean was calculated for a smoothed annual trend line.",
             "A cumulative count curve was derived from the annual counts.",
         ],
@@ -135,8 +198,8 @@ def render_publications_over_time(summary: dict) -> dict:
             "Corpus restricted to validated English-language articles and reviews.",
         ],
         "plotting": [
-            "Top panel uses muted teal bars plus a contrasting brick trend line.",
-            "Bottom panel uses a cumulative area-and-line treatment for thesis-friendly readability.",
+            "Top panel uses muted teal bars plus a contrasting brick trend line; the observed 2026 count remains solid while the projected remainder is hatched.",
+            "Bottom panel uses a cumulative area-and-line treatment for thesis-friendly readability, with a dashed extension for the projected 2026 year-end total.",
             "Exports were saved as PNG, PDF, and SVG at 400 dpi.",
         ],
         "interpretation": [
@@ -144,7 +207,8 @@ def render_publications_over_time(summary: dict) -> dict:
             "Inflection points can be compared against historical shifts from toxicology-centric work toward immunity, microbiome, and cancer themes.",
         ],
         "caveats": _methods_common(summary)["caveats"] + [
-            "The 2026 bar reflects a partial year because the pipeline was run during 2026 rather than after year-end indexing closed.",
+            f"The {current_year} year-end estimate is a simple projection from papers indexed through {today.strftime('%B %-d, %Y')} and assumes roughly steady within-year accrual.",
+            "OpenAlex indexing and validation timing are not uniform within a year, so the projected segment is intended to prevent a misleading visual dip rather than to serve as a forecast claim.",
         ],
     }
     write_methods_file(METHODS_DIR / "figure_01_publications_over_time.md", metadata)
