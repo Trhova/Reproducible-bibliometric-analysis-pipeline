@@ -1,56 +1,65 @@
-# Reproducible AhR Bibliometric Analysis Pipeline
+# Reproducible Bibliometric Analysis Pipeline
 
-This repository builds a reproducible bibliometric analysis workflow for the aryl hydrocarbon receptor (AhR) literature using OpenAlex metadata and a conservative local validation layer designed to reduce non-biological `AHR` ambiguity.
+This repository is a configurable Python pipeline for reproducible bibliometric analysis built on OpenAlex metadata. It fetches a literature corpus, applies a local validation layer, normalizes metadata, generates analysis tables, renders publication-quality figures, writes figure-method companion files, and assembles a combined PDF summary report.
 
-When the full pipeline is run, it produces:
+The included example configuration targets the aryl hydrocarbon receptor (AhR) literature, but the architecture is now query-driven rather than AhR-only. To reuse the project for another topic, edit the main project config and rerun the workflow.
 
-- `output/figures/`: thesis-ready candidate figures in `.png`, `.pdf`, and `.svg`
-- `output/figure_methods/`: one markdown companion file per figure
+## What the pipeline produces
+
+- `data/raw/`: cached OpenAlex retrievals and query summaries
+- `data/processed/`: validated corpus tables and corpus summaries
 - `output/tables/`: reusable analysis tables that support the figures
-- `data/raw/` and `data/processed/`: cached metadata and cleaned corpus tables
+- `output/figures/`: thesis-ready `.png`, `.pdf`, and `.svg` figures
+- `output/figure_methods/`: one markdown companion file per figure
+- `output/reports/`: combined PDF report, markdown summary, and Mermaid corpus-flow assets
 
 ## Project layout
 
 ```text
 configs/
-  disease_dictionary.yaml
-  search_queries.yaml
-  stopwords_terms.txt
-  synonyms.yaml
+  project.yaml
 data/
   raw/
   processed/
 output/
   figure_methods/
   figures/
+  reports/
   tables/
 src/
-  ahr_bibliometrics/
+  ahr_bibliometrics/        # legacy package name kept for compatibility
+  bibliometric_pipeline/    # generic entrypoint package
 README.md
 Makefile
 requirements.txt
 ```
 
-## What the pipeline does
+## Main configuration
 
-1. Fetches OpenAlex works using exact title/abstract phrase queries for:
-   - `aryl hydrocarbon receptor`
-   - `ah receptor`
-   - `dioxin receptor`
-   - title-level `AHR`
-2. Validates each candidate record locally using explicit AhR naming or acronym-plus-biological-context rules.
-3. Builds a cleaned corpus table from titles, available abstracts, OpenAlex keywords, and MeSH descriptors.
-4. Applies editable text normalization, stopword removal, synonym harmonization, and dictionary-based disease/application tagging.
-5. Generates multiple candidate figures:
-   - publication growth over time
-   - disease/application distribution
-   - disease/application trends across time slices
-   - full-corpus term co-occurrence network
-   - immune-barrier-microbiome subset network
-   - thematic term evolution
-   - thematic cluster map
-   - top journals
-6. Writes a methods markdown file for every figure with enough detail for later thesis-methods reuse.
+The pipeline is driven by a single file:
+
+- [`configs/project.yaml`](/home/trhova/thesis_2026_writing/configs/project.yaml)
+
+That config contains:
+
+- project metadata and output prefix
+- OpenAlex API settings
+- search filters and query definitions
+- validation rules for ambiguous acronyms or topic-specific exclusions
+- text normalization, aliases, and stopwords
+- disease/application dictionaries
+- time slices, focus subsets, and report figure order
+- topic-specific concept-cleaning resources used by the advanced map figures
+
+## Included example: AhR
+
+The shipped example config uses a conservative AhR retrieval strategy based on:
+
+- exact title/abstract phrase queries for `aryl hydrocarbon receptor`, `ah receptor`, and `dioxin receptor`
+- title-level `AHR` hits
+- local validation rules that reject common non-biological acronym uses
+
+This is intentionally precision-oriented. The goal is a defendable corpus for thesis figures rather than the largest possible noisy retrieval.
 
 ## Installation
 
@@ -60,40 +69,61 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Usage
+## Running the workflow
 
-Run the full workflow:
+Run everything:
 
 ```bash
 make all
 ```
 
-Or run stage by stage:
+Or run step by step:
 
 ```bash
 make fetch
 make preprocess
 make analyze
 make figures
+make report
 ```
 
-You can also call the CLI directly:
+The generic CLI entrypoint is:
 
 ```bash
-PYTHONPATH=src python3 -m ahr_bibliometrics.cli all
+PYTHONPATH=src python3 -m bibliometric_pipeline.cli all
 ```
 
-## Reproducibility and edit points
+You can also point the CLI at another project config:
 
-- Search logic is stored in [`configs/search_queries.yaml`](/home/trhova/thesis_2026_writing/configs/search_queries.yaml).
-- Synonym merging rules are stored in [`configs/synonyms.yaml`](/home/trhova/thesis_2026_writing/configs/synonyms.yaml).
-- Domain stopwords are stored in [`configs/stopwords_terms.txt`](/home/trhova/thesis_2026_writing/configs/stopwords_terms.txt).
-- Disease/application tagging rules are stored in [`configs/disease_dictionary.yaml`](/home/trhova/thesis_2026_writing/configs/disease_dictionary.yaml).
+```bash
+PYTHONPATH=src python3 -m bibliometric_pipeline.cli all --config /path/to/project.yaml
+```
 
-The default search strategy is intentionally conservative. It is designed to produce an interpretable, defendable AhR corpus rather than the largest possible noisy retrieval. If recall needs to be broadened later, edit the query and validation config rather than changing the downstream analysis code.
+## Output report
 
-## Important caveats
+The reporting step builds a combined PDF report in `output/reports/` that includes:
 
-- OpenAlex abstract coverage is incomplete. Disease/application tagging therefore uses titles, available abstracts, OpenAlex keywords, and MeSH descriptors, while the final term-network and clustering analyses rely on title-plus-abstract text for cleaner maps.
-- Disease/application tags are dictionary-based approximations and can assign multiple categories to one paper.
-- Network views are deliberately pruned for readability; they should be read as high-salience structure rather than exhaustive maps.
+- a summary page with key corpus statistics
+- a corpus filtering / retention overview
+- all generated figures in configured order
+
+The same step also writes Mermaid corpus-flow assets so the retention diagram can be reused in documentation or thesis materials.
+
+## Adapting to a new topic
+
+To repurpose the repo for another literature question:
+
+1. Copy [`configs/project.yaml`](/home/trhova/thesis_2026_writing/configs/project.yaml).
+2. Update `project.name`, `project.short_name`, and `project.output_prefix`.
+3. Replace the search queries and validation rules in the `search:` section.
+4. Adjust the synonym mappings, stopwords, focus-tag patterns, and disease/theme dictionaries.
+5. Rerun the pipeline.
+
+For simple use cases, editing the query, validation, aliases, and stopwords may be enough. For highly domain-specific concept maps, you may also want to update the `analysis:` concept canonicalization and text-marker sections so the clustering and network outputs remain interpretable.
+
+## Reproducibility notes
+
+- The current AhR figures and tables remain the reference example output.
+- The advanced term-map figures are deliberately pruned for readability rather than exhaustiveness.
+- OpenAlex abstract coverage is incomplete, so some analyses rely on titles plus available metadata rather than abstracts alone.
+- Dictionary-based disease/application tagging is approximate and multi-label by design.

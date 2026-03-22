@@ -11,7 +11,7 @@ from sklearn.cluster import MiniBatchKMeans
 from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
 
-from .config import TABLE_DIR, load_search_config, load_synonyms_config, save_json
+from .config import TABLE_DIR, load_project_config, load_synonyms_config, save_json
 from .io_utils import slugify
 from .text_processing import apply_alias_replacements, build_alias_map, normalize_text, parse_pipe_list
 
@@ -294,6 +294,54 @@ GEOGRAPHY_THEME_GROUPS = {
 }
 
 
+def _analysis_settings() -> dict:
+    return load_project_config().get("analysis", {})
+
+
+def _concept_exclude_terms() -> set[str]:
+    return set(_analysis_settings().get("concept_exclude_terms", CONCEPT_EXCLUDE_TERMS))
+
+
+def _concept_canonical_map() -> dict[str, str]:
+    return _analysis_settings().get("concept_canonical_map", CONCEPT_CANONICAL_MAP)
+
+
+def _text_markers() -> dict[str, list[str]]:
+    return _analysis_settings().get("text_markers", TEXT_MARKERS)
+
+
+def _theme_profiles() -> dict[str, dict]:
+    return _analysis_settings().get("theme_profiles", THEME_PROFILES)
+
+
+def _geography_theme_groups() -> dict[str, dict]:
+    return _analysis_settings().get("geography_theme_groups", GEOGRAPHY_THEME_GROUPS)
+
+
+def _term_evolution_trackers() -> list[str]:
+    return _analysis_settings().get(
+        "term_evolution_trackers",
+        [
+            "dioxin / TCDD",
+            "PAHs",
+            "cytochrome P450",
+            "CYP1A1",
+            "cancer",
+            "breast cancer",
+            "inflammation",
+            "immune system",
+            "microbiome",
+            "intestinal barrier",
+            "tryptophan",
+            "kynurenine",
+            "tumor immunity",
+            "Treg cells",
+            "Th17 cells",
+            "ARNT",
+        ],
+    )
+
+
 def _analysis_stopwords(stopwords: set[str]) -> list[str]:
     return sorted(set(stopwords) | set(ENGLISH_STOP_WORDS))
 
@@ -313,8 +361,8 @@ def _normalize_concept(raw: str, alias_to_token: dict[str, str], normalizations:
     text = normalize_text(raw, normalizations=normalizations)
     text = apply_alias_replacements(text, alias_to_token)
     text = text.replace("_", " ").strip()
-    text = CONCEPT_CANONICAL_MAP.get(text, text)
-    if not text or text in CONCEPT_EXCLUDE_TERMS:
+    text = _concept_canonical_map().get(text, text)
+    if not text or text in _concept_exclude_terms():
         return None
     return text
 
@@ -327,7 +375,7 @@ def _extract_concepts_from_row(row: pd.Series, alias_to_token: dict[str, str], n
             if concept:
                 terms.add(concept)
     text = str(row.get("analysis_text", "") or "")
-    for concept, patterns in TEXT_MARKERS.items():
+    for concept, patterns in _text_markers().items():
         if any(re.search(pattern, text) for pattern in patterns):
             terms.add(concept)
     return sorted(terms)
@@ -339,10 +387,8 @@ def _cluster_label(top_terms: list[str]) -> str:
     if any(term in lower_terms for term in {"structure activity relationship", "stereochemistry", "biophysics", "cytosol"}):
         return "Ligand chemistry and structure-activity"
 
-    scores = {
-        theme: sum(term in profile["terms"] for term in terms)
-        for theme, profile in THEME_PROFILES.items()
-    }
+    theme_profiles = _theme_profiles()
+    scores = {theme: sum(term in profile["terms"] for term in terms) for theme, profile in theme_profiles.items()}
     environmental_terms = {"liver", "toxicity", "environmental pollutants", "xenobiotic"}
     cyp_terms = {"cytochrome P450", "CYP1A1", "CYP1B1", "cytochrome p 450 enzyme system"}
 
@@ -389,14 +435,18 @@ def _cluster_label(top_terms: list[str]) -> str:
 
     best_theme = max(scores, key=scores.get)
     if scores[best_theme] > 0:
-        return str(THEME_PROFILES[best_theme]["label"])
+        return str(theme_profiles[best_theme]["label"])
     return "Mechanistic and translational AhR studies"
 
 
 def _subset_mask(works: pd.DataFrame, subset_name: str) -> pd.Series:
     if subset_name == "all":
         return pd.Series(True, index=works.index)
-    return works["focus_tags"].fillna("").str.contains("immune|microbiome|barrier|inflammation|gut|intestinal")
+    subset_terms = load_project_config().get("analysis", {}).get("focus_subsets", {}).get(subset_name, [])
+    if not subset_terms:
+        return pd.Series(False, index=works.index)
+    pattern = "|".join(re.escape(term) for term in subset_terms)
+    return works["focus_tags"].fillna("").str.contains(pattern, regex=True)
 
 
 def _deduplicate_cluster_labels(cluster_summary: pd.DataFrame) -> pd.DataFrame:
@@ -421,8 +471,8 @@ def _geography_theme_flags(row: pd.Series) -> dict[str, bool]:
     focus_tags = set(parse_pipe_list(row.get("focus_tags", "")))
     disease_tags = set(parse_pipe_list(row.get("disease_tags", "")))
     return {
-        theme: bool(focus_tags & spec["focus_tags"] or disease_tags & spec["disease_tags"])
-        for theme, spec in GEOGRAPHY_THEME_GROUPS.items()
+        theme: bool(focus_tags & set(spec["focus_tags"]) or disease_tags & set(spec["disease_tags"]))
+        for theme, spec in _geography_theme_groups().items()
     }
 
 
@@ -501,24 +551,7 @@ def build_disease_tables(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
 
 
 def build_term_evolution(works: pd.DataFrame) -> pd.DataFrame:
-    trackers = [
-        "dioxin / TCDD",
-        "PAHs",
-        "cytochrome P450",
-        "CYP1A1",
-        "cancer",
-        "breast cancer",
-        "inflammation",
-        "immune system",
-        "microbiome",
-        "intestinal barrier",
-        "tryptophan",
-        "kynurenine",
-        "tumor immunity",
-        "Treg cells",
-        "Th17 cells",
-        "ARNT",
-    ]
+    trackers = _term_evolution_trackers()
     docs, _ = _concept_documents(works)
     rows = []
     concept_sets = [set(doc) for doc in docs]
@@ -810,7 +843,7 @@ def build_geography_tables(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
         "country_metadata_coverage": float(n_with_country / max(len(works), 1)),
         "n_countries_with_activity": int(country_activity["country"].nunique()),
         "fractional_counting": True,
-        "theme_groups": list(GEOGRAPHY_THEME_GROUPS.keys()),
+        "theme_groups": list(_geography_theme_groups().keys()),
     }
     return country_activity, country_theme, geography_summary
 

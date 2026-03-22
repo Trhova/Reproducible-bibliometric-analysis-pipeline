@@ -149,24 +149,21 @@ def _iter_feature_polygons(geometry: dict) -> list[np.ndarray]:
 
 
 def _methods_common(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
     return {
-        "corpus_name": "Validated AhR OpenAlex corpus",
+        "corpus_name": summary.get("corpus_name", f"Validated {short_name} OpenAlex corpus"),
         "n_papers": summary["n_papers"],
         "time_window": f"{summary['year_min']} to {summary['year_max']}",
-        "query_summary": (
-            'OpenAlex exact-match title/abstract retrieval for "aryl hydrocarbon receptor", '
-            '"ah receptor", and "dioxin receptor", plus title-level "AHR" hits; local regex validation '
-            "retained records with explicit AhR naming in the title or abstract-phrase hits supported by biologically relevant title language."
-        ),
+        "query_summary": summary.get("query_summary", ""),
         "preprocessing": [
             "English-language articles and reviews were retained.",
             "Titles, available abstracts, OpenAlex keywords, and MeSH descriptors were normalized after corpus retrieval.",
             "Disease/application tagging still uses broad metadata support, but the upgraded landscape figures use curated concept labels derived from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching.",
-            "Text was lowercased, punctuation-normalized, and harmonized with editable synonym mappings in configs/synonyms.yaml.",
-            "Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt plus figure-specific concept exclusions were removed from map-style analyses.",
+            "Text was lowercased, punctuation-normalized, and harmonized with synonym mappings from the active project config.",
+            "Generic bibliometric and non-informative scientific terms from the active project config plus figure-specific concept exclusions were removed from map-style analyses.",
         ],
         "caveats": [
-            "The corpus favors precision over total recall because ambiguous plain-AHR abstracts were not retrieved exhaustively.",
+            "The corpus favors precision over total recall because ambiguous plain-acronym records were not retrieved exhaustively.",
             "OpenAlex abstract coverage is incomplete, so concept-map coverage partly depends on keyword and MeSH richness rather than abstract availability alone.",
             "Dictionary-tagged disease/application assignments are approximate, multi-label, and sensitive to the editable regex dictionary.",
         ],
@@ -174,6 +171,7 @@ def _methods_common(summary: dict) -> dict:
 
 
 def render_publications_over_time(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
     annual = pd.read_csv(TABLE_DIR / "publication_counts.csv")
     annual_display = annual.copy()
     today = date.today()
@@ -215,7 +213,7 @@ def render_publications_over_time(summary: dict) -> dict:
         )
     axes[0].plot(annual_display["publication_year"], annual_display["rolling_mean_3y"], color=BASE_COLORS["brick"], linewidth=2.4)
     axes[0].set_ylabel("Publications")
-    axes[0].set_title("AhR Literature Growth")
+    axes[0].set_title(f"{short_name} Literature Growth")
     axes[0].text(
         0.01,
         0.93,
@@ -276,8 +274,8 @@ def render_publications_over_time(summary: dict) -> dict:
 
     save_figure(fig, "figure_01_publications_over_time")
     metadata = _methods_common(summary) | {
-        "title": "Figure 01. AhR literature growth over time",
-        "purpose": "Shows annual publication counts and the cumulative growth trajectory of the validated AhR literature.",
+        "title": f"Figure 01. {short_name} literature growth over time",
+        "purpose": f"Shows annual publication counts and the cumulative growth trajectory of the validated {short_name} literature.",
         "analysis_steps": [
             "Papers were grouped by publication year.",
             "For 2026, the observed year-to-date count was annualized from the pipeline run date to estimate a year-end total, and the projected remainder was drawn as a hatched bar segment.",
@@ -294,7 +292,7 @@ def render_publications_over_time(summary: dict) -> dict:
             "Exports were saved as PNG, PDF, and SVG at 400 dpi.",
         ],
         "interpretation": [
-            "This figure is suited to framing AhR as a mature but still expanding field.",
+            f"This figure is suited to framing {short_name} as a mature but still expanding field.",
             "Inflection points can be compared against historical shifts from toxicology-centric work toward immunity, microbiome, and cancer themes.",
         ],
         "caveats": _methods_common(summary)["caveats"] + [
@@ -307,6 +305,7 @@ def render_publications_over_time(summary: dict) -> dict:
 
 
 def render_disease_distribution(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
     disease = pd.read_csv(TABLE_DIR / "disease_distribution.csv").head(10)
     set_plot_style()
     fig, ax = plt.subplots(figsize=(11, 6.8))
@@ -316,12 +315,12 @@ def render_disease_distribution(summary: dict) -> dict:
     for y, (_, row) in enumerate(disease.iterrows()):
         ax.text(row["n_papers"] + 10, y, f"{row['n_papers']:,} ({row['share']:.0%})", va="center", fontsize=10)
     ax.set_xlabel("Tagged papers")
-    ax.set_title("Disease and Application Landscape of AhR Research")
+    ax.set_title(f"Disease and Application Landscape of {short_name} Research")
     ax.spines[["top", "right"]].set_visible(False)
     save_figure(fig, "figure_02_disease_application_distribution")
     metadata = _methods_common(summary) | {
-        "title": "Figure 02. Disease and application distribution across the AhR corpus",
-        "purpose": "Summarizes which disease and translational application areas appear most often in the AhR literature.",
+        "title": f"Figure 02. Disease and application distribution across the {short_name} corpus",
+        "purpose": f"Summarizes which disease and translational application areas appear most often in the {short_name} literature.",
         "analysis_steps": [
             "Dictionary-based category tags were applied to each paper using normalized titles, available abstracts, keywords, MeSH descriptors, and topic labels.",
             "Papers could receive multiple categories if multiple pattern groups matched.",
@@ -337,7 +336,7 @@ def render_disease_distribution(summary: dict) -> dict:
         ],
         "interpretation": [
             "This figure helps position cancer, barrier, microbiome, toxicology, and immune themes relative to one another.",
-            "It is useful for arguing whether thesis-relevant application areas are niche or mainstream branches within the wider AhR field.",
+            f"It is useful for arguing whether thesis-relevant application areas are niche or mainstream branches within the wider {short_name} field.",
         ],
     }
     write_methods_file(METHODS_DIR / "figure_02_disease_application_distribution.md", metadata)
@@ -345,6 +344,7 @@ def render_disease_distribution(summary: dict) -> dict:
 
 
 def render_disease_trends(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
     trends = pd.read_csv(TABLE_DIR / "disease_trends.csv")
     if trends.empty:
         return {}
@@ -365,13 +365,13 @@ def render_disease_trends(summary: dict) -> dict:
         cbar_kws={"label": "Share of papers within period"},
         ax=ax,
     )
-    ax.set_title("How AhR Application Areas Shifted Across Time")
+    ax.set_title(f"How {short_name} Application Areas Shifted Across Time")
     ax.set_xlabel("Time period")
     ax.set_ylabel("")
     save_figure(fig, "figure_03_disease_application_trends")
     metadata = _methods_common(summary) | {
-        "title": "Figure 03. Disease and application trends across AhR field eras",
-        "purpose": "Shows how major AhR application areas changed in prominence from early to recent literature.",
+        "title": f"Figure 03. Disease and application trends across {short_name} field eras",
+        "purpose": f"Shows how major {short_name} application areas changed in prominence from early to recent literature.",
         "analysis_steps": [
             "The corpus was sliced into 1980-1999, 2000-2012, and 2013-2026 using the editable config file.",
             "Multi-label dictionary tags were counted within each period.",
@@ -386,7 +386,7 @@ def render_disease_trends(summary: dict) -> dict:
             "Cell annotations are shown directly on the map for methods-ready interpretation.",
         ],
         "interpretation": [
-            "This figure is suited to discussing whether toxicology-led AhR work has broadened toward immune, barrier, microbiome, and cancer contexts over time.",
+            f"This figure is suited to discussing whether toxicology-led {short_name} work has broadened toward immune, barrier, microbiome, and cancer contexts over time.",
             "Because categories are multi-label, increases can reflect expansion in overlap between domains rather than replacement of one area by another.",
         ],
     }
@@ -538,6 +538,7 @@ def render_concept_map(
     changes: list[str],
     threshold_notes: list[str],
 ) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
     nodes = pd.read_csv(TABLE_DIR / nodes_file)
     edges = pd.read_csv(TABLE_DIR / edges_file)
     clusters = pd.read_csv(TABLE_DIR / clusters_file)
@@ -571,7 +572,7 @@ def render_concept_map(
             "Translucent cluster envelopes and a dedicated side legend panel were added to make the map legible without referring back to the methods.",
         ],
         "interpretation": [
-            "This figure should be read as a conceptual landscape of the AhR field rather than as a comprehensive display of every detectable term.",
+            f"This figure should be read as a conceptual landscape of the {short_name} field rather than as a comprehensive display of every detectable term.",
             "Clusters summarize high-salience thematic neighborhoods and the bridging edges between them.",
         ],
     }
@@ -608,6 +609,7 @@ def _draw_alluvial_ribbon(ax: plt.Axes, x0: float, x1: float, y0: tuple[float, f
 
 
 def render_thematic_evolution(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
     cluster_period = pd.read_csv(TABLE_DIR / "cluster_period_shares.csv")
     cluster_summary = pd.read_csv(TABLE_DIR / "cluster_summary.csv")
     color_map = _cluster_color_map(cluster_summary)
@@ -658,7 +660,7 @@ def render_thematic_evolution(summary: dict) -> dict:
     ax.set_ylim(0, 1.08)
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_title("Thematic Evolution of AhR Research", loc="left", pad=14)
+    ax.set_title(f"Thematic Evolution of {short_name} Research", loc="left", pad=14)
     ax.text(
         0.0,
         1.01,
@@ -689,11 +691,11 @@ def render_thematic_evolution(summary: dict) -> dict:
 
     save_figure(fig, "figure_06_thematic_evolution")
     metadata = _methods_common(summary) | {
-        "title": "Thematic Evolution of AhR Research",
-        "purpose": "Shows how the major thematic clusters of the AhR field changed across early, middle, and recent eras.",
+        "title": f"Thematic Evolution of {short_name} Research",
+        "purpose": f"Shows how the major thematic clusters of the {short_name} field changed across early, middle, and recent eras.",
         "changes": [
             "This figure replaces the earlier heatmap-style evolution view with an alluvial-style cluster-flow map.",
-            "The redesign makes the rise of microbiome, barrier, immune, and cancer-linked AhR themes easier to compare against older toxicology-centered themes.",
+            f"The redesign makes the rise of microbiome, barrier, immune, and cancer-linked {short_name} themes easier to compare against older toxicology-centered themes.",
         ],
         "analysis_steps": [
             "Papers were clustered on TF-IDF concept profiles derived from normalized keyword, MeSH, and targeted title/abstract marker labels.",
@@ -720,6 +722,7 @@ def render_thematic_evolution(summary: dict) -> dict:
 
 
 def render_cluster_map(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
     docs = pd.read_csv(TABLE_DIR / "cluster_assignments.csv")
     clusters = pd.read_csv(TABLE_DIR / "cluster_summary.csv")
     color_map = _cluster_color_map(clusters)
@@ -796,7 +799,7 @@ def render_cluster_map(summary: dict) -> dict:
             zorder=2,
         )
 
-    ax.set_title("Document Landscape of AhR Research Themes", loc="left", pad=14)
+    ax.set_title(f"Document Landscape of {short_name} Research Themes", loc="left", pad=14)
     ax.text(
         0.0,
         1.01,
@@ -826,7 +829,7 @@ def render_cluster_map(summary: dict) -> dict:
 
     save_figure(fig, "figure_07_thematic_cluster_map")
     metadata = _methods_common(summary) | {
-        "title": "Document Landscape of AhR Research Themes",
+        "title": f"Document Landscape of {short_name} Research Themes",
         "purpose": "Provides a document-level thematic landscape complementary to the term co-occurrence concept map.",
         "changes": [
             "This figure replaces the earlier bubble-only cluster summary with a true document landscape.",
@@ -848,7 +851,7 @@ def render_cluster_map(summary: dict) -> dict:
             "Cluster labels show the cluster theme plus leading representative concepts.",
         ],
         "interpretation": [
-            "Papers that occupy the same island share similar AhR-associated concept profiles.",
+            f"Papers that occupy the same island share similar {short_name}-associated concept profiles.",
             "This figure is a field-structure view rather than a citation or chronology map, so distances should be read qualitatively.",
         ],
     }
@@ -857,17 +860,18 @@ def render_cluster_map(summary: dict) -> dict:
 
 
 def render_top_journals(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
     journals = pd.read_csv(TABLE_DIR / "top_journals.csv").sort_values("n_papers")
     set_plot_style()
     fig, ax = plt.subplots(figsize=(11, 6.8))
     ax.hlines(journals["journal"], 0, journals["n_papers"], color="#CFC8B8", linewidth=2.4)
     ax.scatter(journals["n_papers"], journals["journal"], s=80, color=BASE_COLORS["plum"])
-    ax.set_xlabel("Validated AhR papers")
-    ax.set_title("Journals Most Frequently Publishing AhR Research")
+    ax.set_xlabel(f"Validated {short_name} papers")
+    ax.set_title(f"Journals Most Frequently Publishing {short_name} Research")
     ax.spines[["top", "right"]].set_visible(False)
     save_figure(fig, "figure_08_top_journals")
     metadata = _methods_common(summary) | {
-        "title": "Figure 08. Journals most frequently publishing AhR papers",
+        "title": f"Figure 08. Journals most frequently publishing {short_name} papers",
         "purpose": "Offers a lightweight publishing-landscape view without letting citation metrics dominate the analysis.",
         "analysis_steps": [
             "Primary source titles were counted across the validated corpus.",
@@ -880,7 +884,7 @@ def render_top_journals(summary: dict) -> dict:
             "A lollipop-style layout was used to keep long journal names legible in thesis format.",
         ],
         "interpretation": [
-            "This figure is a contextual companion, useful for understanding where AhR work tends to concentrate institutionally.",
+            f"This figure is a contextual companion, useful for understanding where {short_name} work tends to concentrate institutionally.",
             "It is descriptive only and should not be read as a quality ranking of journals.",
         ],
     }
@@ -1093,22 +1097,23 @@ def _render_geography_bubble_map(
 
 
 def render_global_geography(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
     _, _, _, raw_codes, _ = _prepare_global_geography_inputs()
     return _render_geography_bubble_map(
         summary,
         stem="figure_09_global_geography_of_ahr_research",
-        title="Global AhR Research Output",
-        subtitle="Bubble area shows fractional AhR paper count by country.",
+        title=f"Global {short_name} Research Output",
+        subtitle=f"Bubble area shows fractional {short_name} paper count by country.",
         value_col="fractional_papers",
         label_codes=raw_codes,
         legend_values=[50, 250, 1000],
-        legend_title="Fractional AhR papers\n(all-country counting)",
+        legend_title=f"Fractional {short_name} papers\n(all-country counting)",
         label_offsets=COUNTRY_LABEL_OFFSETS,
-        purpose="Shows where AhR research is produced globally using a clean bubble map of raw fractional country output.",
+        purpose=f"Shows where {short_name} research is produced globally using a clean bubble map of raw fractional country output.",
         analysis_steps=[
             "Country attribution used the OpenAlex `authorships.countries` metadata already captured in the processed `countries` field.",
             "Each paper was fractionally counted across all unique countries represented on the paper, so a paper with authors from four countries contributed 0.25 to each country.",
-            "The map plots total fractional AhR paper output per country.",
+            f"The map plots total fractional {short_name} paper output per country.",
             "Country names and map positions were normalized by joining ISO alpha-2 country codes to the cached Natural Earth 1:110m country boundary file.",
         ],
         thresholds=[
@@ -1116,8 +1121,8 @@ def render_global_geography(summary: dict) -> dict:
             "Only the top 12 countries by raw output were labeled directly on the map to avoid crowding.",
         ],
         interpretation=[
-            "This map emphasizes absolute country output in the AhR field.",
-            "Large bubbles indicate countries that dominate the validated AhR literature in total volume.",
+            f"This map emphasizes absolute country output in the {short_name} field.",
+            f"Large bubbles indicate countries that dominate the validated {short_name} literature in total volume.",
         ],
         caveats=[
             "Geographic attribution depends on country metadata being present in OpenAlex authorships; papers lacking country metadata are excluded from the geography figure.",
@@ -1127,22 +1132,23 @@ def render_global_geography(summary: dict) -> dict:
 
 
 def render_global_geography_per_capita(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
     _, _, _, _, per_capita_codes = _prepare_global_geography_inputs()
     return _render_geography_bubble_map(
         summary,
         stem="figure_10_global_geography_of_ahr_research_per_capita",
-        title="Global AhR Research Output Per Capita",
-        subtitle="Bubble area shows fractional AhR papers per million inhabitants.",
+        title=f"Global {short_name} Research Output Per Capita",
+        subtitle=f"Bubble area shows fractional {short_name} papers per million inhabitants.",
         value_col="per_million",
         label_codes=per_capita_codes,
         legend_values=[2, 6, 12],
-        legend_title="Fractional AhR papers\nper million inhabitants",
+        legend_title=f"Fractional {short_name} papers\nper million inhabitants",
         label_offsets=COUNTRY_LABEL_OFFSETS_PER_CAPITA,
-        purpose="Shows where AhR research is relatively concentrated after normalizing fractional country output by population size.",
+        purpose=f"Shows where {short_name} research is relatively concentrated after normalizing fractional country output by population size.",
         analysis_steps=[
             "Country attribution used the OpenAlex `authorships.countries` metadata already captured in the processed `countries` field.",
             "Each paper was fractionally counted across all unique countries represented on the paper, so a paper with authors from four countries contributed 0.25 to each country.",
-            "The map normalizes fractional AhR paper counts by country population using the Natural Earth `POP_EST` value and expresses the result as fractional AhR papers per million inhabitants.",
+            f"The map normalizes fractional {short_name} paper counts by country population using the Natural Earth `POP_EST` value and expresses the result as fractional {short_name} papers per million inhabitants.",
             "Country names and map positions were normalized by joining ISO alpha-2 country codes to the cached Natural Earth 1:110m country boundary file.",
         ],
         thresholds=[
@@ -1151,7 +1157,7 @@ def render_global_geography_per_capita(summary: dict) -> dict:
         ],
         interpretation=[
             "This map emphasizes relative research intensity after population normalization.",
-            "Large bubbles can elevate smaller countries with disproportionately strong AhR activity compared with raw output alone.",
+            f"Large bubbles can elevate smaller countries with disproportionately strong {short_name} activity compared with raw output alone.",
         ],
         caveats=[
             "Geographic attribution depends on country metadata being present in OpenAlex authorships; papers lacking country metadata are excluded from the geography figure.",
@@ -1162,6 +1168,7 @@ def render_global_geography_per_capita(summary: dict) -> dict:
 
 
 def render_all_figures(summary: dict, include: set[str] | None = None) -> list[dict]:
+    short_name = summary.get("project_short_name", "AhR")
     renderers = {
         "figure_01_publications_over_time": lambda: render_publications_over_time(summary),
         "figure_02_disease_application_distribution": lambda: render_disease_distribution(summary),
@@ -1172,10 +1179,10 @@ def render_all_figures(summary: dict, include: set[str] | None = None) -> list[d
             edges_file="network_all_edges.csv",
             clusters_file="network_all_clusters.csv",
             stem="figure_04_keyword_network_all_corpus",
-            title="Conceptual Landscape of AhR Research",
-            subtitle="Curated concept co-occurrence map across the full validated AhR corpus",
-            purpose="Maps the major conceptual regions of the AhR field using curated concept labels rather than raw token fragments.",
-            subset_note="The full validated AhR corpus was used.",
+            title=f"Conceptual Landscape of {short_name} Research",
+            subtitle=f"Curated concept co-occurrence map across the full validated {short_name} corpus",
+            purpose=f"Maps the major conceptual regions of the {short_name} field using curated concept labels rather than raw token fragments.",
+            subset_note=f"The full validated {short_name} corpus was used.",
             changes=[
                 "This figure replaces the earlier generic force-directed NetworkX graph with a curated concept map built from concept labels and cluster-aware positioning.",
                 "The updated design adds explicit explanations for node size, node color, and edge meaning, and it uses a side legend plus cluster envelopes to create a more VOSviewer-like field map.",
@@ -1191,12 +1198,12 @@ def render_all_figures(summary: dict, include: set[str] | None = None) -> list[d
             edges_file="network_focus_edges.csv",
             clusters_file="network_focus_clusters.csv",
             stem="figure_05_keyword_network_immune_barrier_microbiome",
-            title="Immune-Microbiome-Barrier AhR Sublandscape",
-            subtitle="Focused concept map of the microbiome, gut, mucosal, inflammatory, and immunoregulatory AhR literature",
-            purpose="Highlights the thesis-relevant AhR sublandscape spanning microbiome, barrier biology, inflammation, and immune regulation.",
+            title=f"Immune-Microbiome-Barrier {short_name} Sublandscape",
+            subtitle=f"Focused concept map of the microbiome, gut, mucosal, inflammatory, and immunoregulatory {short_name} literature",
+            purpose=f"Highlights the thesis-relevant {short_name} sublandscape spanning microbiome, barrier biology, inflammation, and immune regulation.",
             subset_note="Only papers carrying immune, microbiome, barrier, inflammation, gut, or intestinal focus tags were used.",
             changes=[
-                "This figure replaces the earlier weak subnetwork graph with a focused concept map built from a targeted AhR immune-microbiome-barrier subset.",
+                f"This figure replaces the earlier weak subnetwork graph with a focused concept map built from a targeted {short_name} immune-microbiome-barrier subset.",
                 "The updated version removes low-value verbs and uses curated concept labels, explicit legend text, and stronger cluster structure so the figure reads as a coherent subfield map.",
             ],
             threshold_notes=[

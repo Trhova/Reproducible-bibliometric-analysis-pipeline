@@ -82,16 +82,8 @@ def join_pipe(items: Iterable[str]) -> str:
     return "|".join(ordered)
 
 
-def derive_focus_tags(text: str) -> list[str]:
-    tag_map = {
-        "immune": [r"\bimmune\b", r"\btreg\b", r"\bth17\b", r"\bcytokine\b", r"\binterleukin\b"],
-        "inflammation": [r"\binflamm", r"\bcolitis\b"],
-        "microbiome": [r"\bmicrobiome\b", r"\bmicrobiota\b", r"\bdysbiosis\b", r"\bcommensal\b"],
-        "barrier": [r"\bbarrier\b", r"\bmucosal\b", r"\bpermeability\b", r"\bepitheli"],
-        "cancer": [r"\bcancer\b", r"\btumou?r\b", r"\bcarcinoma\b", r"\bmelanoma\b", r"\bglioma\b"],
-        "toxicology": [r"\bdioxin\b", r"\bxenobiotic\b", r"\btoxic", r"\bpah\b", r"\btcdd\b"],
-        "metabolism": [r"\bmetabol", r"\bobesity\b", r"\bdiabetes\b", r"\binsulin\b"],
-    }
+def derive_focus_tags(text: str, tag_map: dict[str, list[str]] | None = None) -> list[str]:
+    tag_map = tag_map or {}
     hits = []
     for tag, patterns in tag_map.items():
         if any(re.search(pattern, text) for pattern in patterns):
