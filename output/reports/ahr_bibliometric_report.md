@@ -11,22 +11,23 @@
 
 ```mermaid
 flowchart TD
-    N1["OpenAlex records retrieved<br/>N = 20,659"]
-    N2["Unique candidates after deduplication<br/>N = 14,504"]
-    N3["Validated corpus<br/>N = 8,291"]
-    N4["Papers with abstracts<br/>N = 5,290"]
-    N5["Papers with country metadata<br/>N = 7,380"]
-    N6["Papers tagged by disease/application dictionary<br/>N = 7,231"]
-    N7["Immune Barrier Microbiome subset<br/>N = 2,996"]
-    N1 --> N2
-    N2 --> N3
-    N3 --> N4
-    N3 --> N5
-    N3 --> N6
-    N3 --> N7
+    A["OpenAlex records retrieved<br/>N = 20,659"]
+    B["Unique candidates after deduplication<br/>N = 14,504"]
+    C["Validated corpus<br/>N = 8,291"]
+    D["Papers with abstracts<br/>N = 5,290"]
+    E["Papers with country metadata<br/>N = 7,380"]
+    F["Papers tagged by disease/application dictionary<br/>N = 7,231"]
+    A --> B --> C
+    C --> D
+    C --> E
+    C --> F
+    classDef stage fill:#F6E7CF,stroke:#C8B79A,color:#1C2331,stroke-width:1px;
+    class A,B,C,D,E,F stage;
+    linkStyle default stroke:#9B8A73,stroke-width:1.3px;
 ```
 
 ## Included figures
+- figure_00_corpus_flow_summary: Figure 00. Corpus filtering and metadata retention flow
 - figure_01_publications_over_time: Figure 01. AhR literature growth over time
 - figure_02_disease_application_distribution: Figure 02. Disease and application distribution across the AhR corpus
 - figure_03_disease_application_trends: Figure 03. Disease and application trends across AhR field eras

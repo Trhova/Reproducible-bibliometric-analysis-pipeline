@@ -16,6 +16,7 @@ import seaborn as sns
 
 from .config import FIGURE_DIR, METHODS_DIR, RAW_DIR, TABLE_DIR
 from .methods import write_methods_file
+from .reporting import build_corpus_flow_steps, draw_corpus_flow_diagram, load_report_inputs
 
 
 FIGURE_FORMATS = ("png", "pdf", "svg")
@@ -168,6 +169,52 @@ def _methods_common(summary: dict) -> dict:
             "Dictionary-tagged disease/application assignments are approximate, multi-label, and sensitive to the editable regex dictionary.",
         ],
     }
+
+
+def render_corpus_flow(summary: dict) -> dict:
+    inputs = load_report_inputs()
+    steps = build_corpus_flow_steps(inputs)
+    set_plot_style()
+    fig, ax = plt.subplots(figsize=(11.2, 7.8))
+    draw_corpus_flow_diagram(
+        ax,
+        steps,
+        title="Corpus Filtering and Retention Flow",
+        subtitle="Technical overview of retrieval, deduplication, validation, and metadata availability.",
+        footnote="Counts are drawn from the current cached retrieval, validated corpus table, and downstream metadata coverage summaries.",
+    )
+    save_figure(fig, "figure_00_corpus_flow_summary")
+
+    metadata = _methods_common(summary) | {
+        "title": "Figure 00. Corpus filtering and metadata retention flow",
+        "purpose": "Summarizes the technical corpus funnel from OpenAlex retrieval through deduplication, validation, and key metadata availability checks.",
+        "analysis_steps": [
+            "The figure uses the raw OpenAlex query summary, the deduplicated raw candidate cache, the validated corpus summary, and downstream metadata coverage counts.",
+            "Retrieved records are counted as the sum of query-level hits before deduplication.",
+            "Unique candidates are counted after merging duplicate OpenAlex works across the configured query set.",
+            "Validated corpus size is taken from the processed corpus after local topic validation.",
+            "Abstract coverage, country-metadata coverage, and disease/application tagging coverage are shown as separate branches from the validated corpus.",
+        ],
+        "thresholds": [
+            "No analytical thresholding was applied beyond the project-level validation rules already used to construct the corpus.",
+            "The diagram reports technical record counts only and intentionally omits thematic subset branches to preserve readability.",
+        ],
+        "plotting": [
+            "The figure is a static box-and-arrow flow diagram with a restrained thesis-style palette and explicit `N = ...` counts in each node.",
+            "The same underlying count structure is also written to Mermaid source in the report assets so the flow can be reused in documentation.",
+            "The figure was exported as PNG, PDF, and SVG at 400 dpi for thesis use.",
+        ],
+        "interpretation": [
+            "This figure is meant as a technical provenance summary rather than a scientific result figure.",
+            "It clarifies how many records were retrieved, retained, and metadata-complete enough for downstream analyses.",
+        ],
+        "caveats": _methods_common(summary)["caveats"] + [
+            "The retrieved-record count sums query hits before deduplication, so one paper can contribute to more than one query-specific retrieval bucket before merging.",
+            "Metadata availability counts are downstream completeness checks, not additional exclusion filters on the validated corpus as a whole.",
+        ],
+    }
+    write_methods_file(METHODS_DIR / "figure_00_corpus_flow_summary.md", metadata)
+    return metadata
 
 
 def render_publications_over_time(summary: dict) -> dict:
@@ -1170,6 +1217,7 @@ def render_global_geography_per_capita(summary: dict) -> dict:
 def render_all_figures(summary: dict, include: set[str] | None = None) -> list[dict]:
     short_name = summary.get("project_short_name", "AhR")
     renderers = {
+        "figure_00_corpus_flow_summary": lambda: render_corpus_flow(summary),
         "figure_01_publications_over_time": lambda: render_publications_over_time(summary),
         "figure_02_disease_application_distribution": lambda: render_disease_distribution(summary),
         "figure_03_disease_application_trends": lambda: render_disease_trends(summary),

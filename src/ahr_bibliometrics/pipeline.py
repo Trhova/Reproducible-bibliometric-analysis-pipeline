@@ -239,6 +239,7 @@ def render_figures(include: set[str] | None = None) -> list[dict]:
 
 
 def generate_report() -> str:
+    render_figures(include={"figure_00_corpus_flow_summary"})
     return str(build_summary_report())
 
 

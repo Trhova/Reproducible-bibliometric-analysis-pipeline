@@ -775,6 +775,7 @@ reporting:
   report_title: "Bibliometric Analysis Summary Report"
   report_subtitle: "Combined figure and corpus-summary report generated from the active project configuration."
   figure_order:
+    - "figure_00_corpus_flow_summary"
     - "figure_01_publications_over_time"
     - "figure_02_disease_application_distribution"
     - "figure_03_disease_application_trends"

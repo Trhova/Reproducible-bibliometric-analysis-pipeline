@@ -34,6 +34,24 @@ Makefile
 requirements.txt
 ```
 
+## Workflow diagram
+
+```mermaid
+flowchart TD
+    A["configs/project.yaml\nproject metadata, queries, validation, cleaning rules"] --> B["fetch\nbibliometric_pipeline.cli fetch"]
+    B --> C["OpenAlex API\nquery retrieval and raw candidate cache"]
+    C --> D["preprocess\nlocal validation + metadata normalization"]
+    D --> E["Processed corpus\nworks.csv.gz + corpus_summary.json"]
+    E --> F["analyze\npublication tables, disease tags, networks, clustering, geography"]
+    F --> G["output/tables/\nreusable analysis tables"]
+    G --> H["figures\npublication-quality static figures"]
+    H --> I["output/figures/\nFigure 00 plus thesis figures"]
+    H --> J["output/figure_methods/\ncompanion methods markdown"]
+    I --> K["report\ncombined PDF summary report"]
+    J --> K
+    K --> L["output/reports/\nPDF report + Mermaid corpus flow assets"]
+```
+
 ## Main configuration
 
 The pipeline is driven by a single file:
