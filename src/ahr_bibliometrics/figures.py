@@ -888,11 +888,12 @@ def render_top_journals(summary: dict) -> dict:
     return metadata
 
 
-def render_global_geography(summary: dict) -> dict:
+def _prepare_global_geography_inputs() -> tuple[pd.DataFrame, list[np.ndarray], dict, list[str], list[str]]:
     country_activity = pd.read_csv(TABLE_DIR / "country_activity.csv")
     geography_summary = json.loads((TABLE_DIR / "geography_summary.json").read_text(encoding="utf-8"))
     features = _load_world_features()
     counts = dict(zip(country_activity["country"], country_activity["fractional_papers"], strict=False))
+
     feature_records = []
     for feature in features:
         properties = feature.get("properties", {})
@@ -932,13 +933,8 @@ def render_global_geography(summary: dict) -> dict:
             continue
         if iso2 not in selected_by_code or record["area_score"] > selected_by_code[iso2]["area_score"]:
             selected_by_code[iso2] = record
-    plot_records = list(selected_by_code.values())
 
-    basemap_patches = []
-    for record in plot_records:
-        for coords in record["polygons"]:
-            basemap_patches.append(Polygon(coords, closed=True))
-
+    basemap_coords = [coords for record in selected_by_code.values() for coords in record["polygons"]]
     country_rows = []
     for iso2, record in selected_by_code.items():
         if iso2 not in counts:
@@ -964,131 +960,111 @@ def render_global_geography(summary: dict) -> dict:
         .head(8)["country"]
         .tolist()
     )
+    return country_points, basemap_coords, geography_summary, raw_codes, per_capita_codes
 
-    def bubble_sizes(values: pd.Series, min_size: float = 8.0, max_size: float = 1700.0) -> np.ndarray:
-        arr = values.to_numpy(dtype=float)
-        arr = np.clip(arr, a_min=0, a_max=None)
-        if len(arr) == 0 or np.nanmax(arr) <= 0:
-            return np.asarray([])
-        root = np.sqrt(arr)
-        low = float(np.nanmin(root))
-        high = float(np.nanmax(root))
-        if np.isclose(low, high):
-            return np.full_like(arr, (min_size + max_size) / 2.0)
-        scaled = np.interp(root, [low, high], [min_size, max_size])
-        return scaled
 
-    def size_handles(values: list[float], series: pd.Series) -> list:
-        scaled = bubble_sizes(pd.Series(values + series.tolist()))
-        handle_sizes = scaled[: len(values)]
-        return [
-            plt.scatter([], [], s=size, facecolor=BASE_COLORS["ochre"], edgecolor=BASE_COLORS["brick"], alpha=0.42, linewidth=0.6)
-            for size in handle_sizes
-        ]
+def _bubble_sizes(values: pd.Series, min_size: float = 8.0, max_size: float = 1700.0) -> np.ndarray:
+    arr = values.to_numpy(dtype=float)
+    arr = np.clip(arr, a_min=0, a_max=None)
+    if len(arr) == 0 or np.nanmax(arr) <= 0:
+        return np.asarray([])
+    root = np.sqrt(arr)
+    low = float(np.nanmin(root))
+    high = float(np.nanmax(root))
+    if np.isclose(low, high):
+        return np.full_like(arr, (min_size + max_size) / 2.0)
+    return np.interp(root, [low, high], [min_size, max_size])
 
-    def draw_basemap(ax: plt.Axes) -> None:
-        ax.add_collection(
-            PatchCollection(
-                [Polygon(p.get_xy(), closed=True) for p in basemap_patches],
-                facecolor="#ECE8E0",
-                edgecolor="#D8D0C2",
-                linewidths=0.35,
-                zorder=0,
-            )
-        )
-        ax.set_xlim(-170, 190)
-        ax.set_ylim(-58, 85)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for spine in ax.spines.values():
-            spine.set_visible(False)
 
-    def draw_panel(
-        ax: plt.Axes,
-        value_col: str,
-        panel_title: str,
-        panel_subtitle: str,
-        label_codes: list[str],
-        legend_values: list[float],
-        legend_title: str,
-        label_offsets: dict[str, tuple[int, int]],
-    ) -> None:
-        draw_basemap(ax)
-        panel_df = country_points.dropna(subset=[value_col]).copy()
-        sizes = bubble_sizes(panel_df[value_col], min_size=10, max_size=1750)
-        ax.scatter(
-            panel_df["label_x"],
-            panel_df["label_y"],
-            s=sizes,
-            facecolor=BASE_COLORS["ochre"],
-            edgecolor=BASE_COLORS["brick"],
-            linewidth=0.6,
-            alpha=0.42,
-            zorder=2,
+def _size_handles(values: list[float], series: pd.Series) -> list:
+    scaled = _bubble_sizes(pd.Series(values + series.tolist()))
+    handle_sizes = scaled[: len(values)]
+    return [
+        plt.scatter([], [], s=size, facecolor=BASE_COLORS["ochre"], edgecolor=BASE_COLORS["brick"], alpha=0.42, linewidth=0.6)
+        for size in handle_sizes
+    ]
+
+
+def _draw_geography_basemap(ax: plt.Axes, basemap_coords: list[np.ndarray]) -> None:
+    ax.add_collection(
+        PatchCollection(
+            [Polygon(coords, closed=True) for coords in basemap_coords],
+            facecolor="#ECE8E0",
+            edgecolor="#D8D0C2",
+            linewidths=0.35,
+            zorder=0,
         )
-        ax.set_title(panel_title, loc="left", pad=12)
-        ax.text(
-            0.0,
-            1.01,
-            panel_subtitle,
-            transform=ax.transAxes,
-            fontsize=10.0,
-            color=BASE_COLORS["slate"],
-        )
-        for _, row in panel_df[panel_df["country"].isin(label_codes)].iterrows():
-            dx, dy = label_offsets.get(row["country"], (0, 0))
-            ax.text(
-                row["label_x"] + dx,
-                row["label_y"] + dy,
-                row["country_name"],
-                fontsize=8.5,
-                ha="center",
-                va="center",
-                bbox={"boxstyle": "round,pad=0.15", "fc": "#FBF9F4", "ec": "none", "alpha": 0.85},
-                zorder=3,
-            )
-        handles = size_handles(legend_values, panel_df[value_col])
-        labels = [f"{value:,.0f}" if value >= 10 else f"{value:.1f}" for value in legend_values]
-        legend = ax.legend(
-            handles,
-            labels,
-            title=legend_title,
-            loc="lower left",
-            bbox_to_anchor=(0.01, 0.02),
-            frameon=False,
-            labelspacing=1.2,
-            handletextpad=1.1,
-            fontsize=8.8,
-            title_fontsize=9.1,
-        )
+    )
+    ax.set_xlim(-170, 190)
+    ax.set_ylim(-58, 85)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+
+def _render_geography_bubble_map(
+    summary: dict,
+    *,
+    stem: str,
+    title: str,
+    subtitle: str,
+    value_col: str,
+    label_codes: list[str],
+    legend_values: list[float],
+    legend_title: str,
+    label_offsets: dict[str, tuple[int, int]],
+    purpose: str,
+    interpretation: list[str],
+    thresholds: list[str],
+    analysis_steps: list[str],
+    caveats: list[str],
+) -> dict:
+    country_points, basemap_coords, geography_summary, _, _ = _prepare_global_geography_inputs()
+    panel_df = country_points.dropna(subset=[value_col]).copy()
 
     set_plot_style()
-    fig = plt.figure(figsize=(16.2, 8.4))
-    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1], wspace=0.08)
-    ax_raw = fig.add_subplot(gs[0, 0])
-    ax_pc = fig.add_subplot(gs[0, 1])
-
-    draw_panel(
-        ax_raw,
-        value_col="fractional_papers",
-        panel_title="Global AhR Research Output",
-        panel_subtitle="Bubble area shows fractional AhR paper count by country.",
-        label_codes=raw_codes,
-        legend_values=[50, 250, 1000],
-        legend_title="Fractional AhR papers\n(all-country counting)",
-        label_offsets=COUNTRY_LABEL_OFFSETS,
+    fig, ax = plt.subplots(figsize=(10.6, 7.4))
+    _draw_geography_basemap(ax, basemap_coords)
+    sizes = _bubble_sizes(panel_df[value_col], min_size=10, max_size=1850)
+    ax.scatter(
+        panel_df["label_x"],
+        panel_df["label_y"],
+        s=sizes,
+        facecolor=BASE_COLORS["ochre"],
+        edgecolor=BASE_COLORS["brick"],
+        linewidth=0.6,
+        alpha=0.42,
+        zorder=2,
     )
-    draw_panel(
-        ax_pc,
-        value_col="per_million",
-        panel_title="Global AhR Research Output Per Capita",
-        panel_subtitle="Bubble area shows fractional AhR papers per million inhabitants.",
-        label_codes=per_capita_codes,
-        legend_values=[2, 6, 12],
-        legend_title="Fractional AhR papers\nper million inhabitants",
-        label_offsets=COUNTRY_LABEL_OFFSETS_PER_CAPITA,
+    ax.set_title(title, loc="left", pad=12)
+    ax.text(0.0, 1.01, subtitle, transform=ax.transAxes, fontsize=10.0, color=BASE_COLORS["slate"])
+    for _, row in panel_df[panel_df["country"].isin(label_codes)].iterrows():
+        dx, dy = label_offsets.get(row["country"], (0, 0))
+        ax.text(
+            row["label_x"] + dx,
+            row["label_y"] + dy,
+            row["country_name"],
+            fontsize=8.6,
+            ha="center",
+            va="center",
+            bbox={"boxstyle": "round,pad=0.15", "fc": "#FBF9F4", "ec": "none", "alpha": 0.85},
+            zorder=3,
+        )
+    handles = _size_handles(legend_values, panel_df[value_col])
+    labels = [f"{value:,.0f}" if value >= 10 else f"{value:.1f}" for value in legend_values]
+    ax.legend(
+        handles,
+        labels,
+        title=legend_title,
+        loc="lower left",
+        bbox_to_anchor=(0.01, 0.02),
+        frameon=False,
+        labelspacing=1.2,
+        handletextpad=1.1,
+        fontsize=8.8,
+        title_fontsize=9.1,
     )
-
     fig.text(
         0.015,
         0.03,
@@ -1096,41 +1072,93 @@ def render_global_geography(summary: dict) -> dict:
         fontsize=9.2,
         color=BASE_COLORS["slate"],
     )
+    save_figure(fig, stem)
 
-    save_figure(fig, "figure_09_global_geography_of_ahr_research")
     metadata = _methods_common(summary) | {
-        "title": "Global Geography of AhR Research",
-        "purpose": "Shows where AhR research is produced globally using a clean bubble-map view of raw output and per-capita output.",
-        "analysis_steps": [
-            "Country attribution used the OpenAlex `authorships.countries` metadata already captured in the processed `countries` field.",
-            "Each paper was fractionally counted across all unique countries represented on the paper, so a paper with authors from four countries contributed 0.25 to each country.",
-            "Panel A plots total fractional AhR paper output per country.",
-            "Panel B normalizes the same fractional AhR paper counts by country population using the Natural Earth `POP_EST` value and expresses the result as fractional AhR papers per million inhabitants.",
-            "Country names and map positions were normalized by joining ISO alpha-2 country codes to the cached Natural Earth 1:110m country boundary file.",
-        ],
-        "thresholds": [
-            "All countries with valid metadata were eligible for display in the raw-output bubble map.",
-            "Countries with missing or non-positive Natural Earth population estimates were omitted from the per-capita normalization panel.",
-            "Only the top 12 countries by raw output and the top 8 countries by per-capita output among countries with at least 25 fractional papers were labeled directly on the maps to avoid crowding.",
-        ],
+        "title": title,
+        "purpose": purpose,
+        "analysis_steps": analysis_steps,
+        "thresholds": thresholds,
         "plotting": [
-            "Both panels use a light gray world basemap with minimal borders and semi-transparent single-color bubbles.",
-            "Bubble area, not color, carries the quantitative encoding in both panels.",
-            "A small bubble-size legend was added to each panel to make the counting scale explicit.",
+            "The figure uses a light gray world basemap with minimal borders and semi-transparent single-color bubbles.",
+            "Bubble area, not color, carries the quantitative encoding.",
+            "A bubble-size legend was added directly on the map to make the scale explicit.",
             "The figure was exported as PNG, PDF, and SVG at 400 dpi for thesis use.",
         ],
-        "interpretation": [
-            "The left map emphasizes absolute country output in the AhR field.",
-            "The right map emphasizes relative research intensity after population normalization and can elevate smaller countries with disproportionately strong AhR activity.",
+        "interpretation": interpretation,
+        "caveats": _methods_common(summary)["caveats"] + caveats,
+    }
+    write_methods_file(METHODS_DIR / f"{stem}.md", metadata)
+    return metadata
+
+
+def render_global_geography(summary: dict) -> dict:
+    _, _, _, raw_codes, _ = _prepare_global_geography_inputs()
+    return _render_geography_bubble_map(
+        summary,
+        stem="figure_09_global_geography_of_ahr_research",
+        title="Global AhR Research Output",
+        subtitle="Bubble area shows fractional AhR paper count by country.",
+        value_col="fractional_papers",
+        label_codes=raw_codes,
+        legend_values=[50, 250, 1000],
+        legend_title="Fractional AhR papers\n(all-country counting)",
+        label_offsets=COUNTRY_LABEL_OFFSETS,
+        purpose="Shows where AhR research is produced globally using a clean bubble map of raw fractional country output.",
+        analysis_steps=[
+            "Country attribution used the OpenAlex `authorships.countries` metadata already captured in the processed `countries` field.",
+            "Each paper was fractionally counted across all unique countries represented on the paper, so a paper with authors from four countries contributed 0.25 to each country.",
+            "The map plots total fractional AhR paper output per country.",
+            "Country names and map positions were normalized by joining ISO alpha-2 country codes to the cached Natural Earth 1:110m country boundary file.",
         ],
-        "caveats": _methods_common(summary)["caveats"] + [
+        thresholds=[
+            "All countries with valid metadata were eligible for display in the bubble map.",
+            "Only the top 12 countries by raw output were labeled directly on the map to avoid crowding.",
+        ],
+        interpretation=[
+            "This map emphasizes absolute country output in the AhR field.",
+            "Large bubbles indicate countries that dominate the validated AhR literature in total volume.",
+        ],
+        caveats=[
             "Geographic attribution depends on country metadata being present in OpenAlex authorships; papers lacking country metadata are excluded from the geography figure.",
             "Fractional counting reduces collaboration-driven overcounting, but it does not distinguish first-author, corresponding-author, or senior-author leadership.",
-            "Per-capita normalization uses Natural Earth population estimates and can be unstable for very small countries, which is why direct labeling in the per-capita panel is restricted to countries with at least 25 fractional papers.",
         ],
-    }
-    write_methods_file(METHODS_DIR / "figure_09_global_geography_of_ahr_research.md", metadata)
-    return metadata
+    )
+
+
+def render_global_geography_per_capita(summary: dict) -> dict:
+    _, _, _, _, per_capita_codes = _prepare_global_geography_inputs()
+    return _render_geography_bubble_map(
+        summary,
+        stem="figure_10_global_geography_of_ahr_research_per_capita",
+        title="Global AhR Research Output Per Capita",
+        subtitle="Bubble area shows fractional AhR papers per million inhabitants.",
+        value_col="per_million",
+        label_codes=per_capita_codes,
+        legend_values=[2, 6, 12],
+        legend_title="Fractional AhR papers\nper million inhabitants",
+        label_offsets=COUNTRY_LABEL_OFFSETS_PER_CAPITA,
+        purpose="Shows where AhR research is relatively concentrated after normalizing fractional country output by population size.",
+        analysis_steps=[
+            "Country attribution used the OpenAlex `authorships.countries` metadata already captured in the processed `countries` field.",
+            "Each paper was fractionally counted across all unique countries represented on the paper, so a paper with authors from four countries contributed 0.25 to each country.",
+            "The map normalizes fractional AhR paper counts by country population using the Natural Earth `POP_EST` value and expresses the result as fractional AhR papers per million inhabitants.",
+            "Country names and map positions were normalized by joining ISO alpha-2 country codes to the cached Natural Earth 1:110m country boundary file.",
+        ],
+        thresholds=[
+            "Countries with missing or non-positive Natural Earth population estimates were omitted from the per-capita normalization map.",
+            "Only the top 8 countries by per-capita output among countries with at least 25 fractional papers were labeled directly on the map to avoid crowding.",
+        ],
+        interpretation=[
+            "This map emphasizes relative research intensity after population normalization.",
+            "Large bubbles can elevate smaller countries with disproportionately strong AhR activity compared with raw output alone.",
+        ],
+        caveats=[
+            "Geographic attribution depends on country metadata being present in OpenAlex authorships; papers lacking country metadata are excluded from the geography figure.",
+            "Fractional counting reduces collaboration-driven overcounting, but it does not distinguish first-author, corresponding-author, or senior-author leadership.",
+            "Per-capita normalization uses Natural Earth population estimates and can be unstable for very small countries, which is why direct labeling is restricted to countries with at least 25 fractional papers.",
+        ],
+    )
 
 
 def render_all_figures(summary: dict, include: set[str] | None = None) -> list[dict]:
@@ -1180,6 +1208,7 @@ def render_all_figures(summary: dict, include: set[str] | None = None) -> list[d
         "figure_07_thematic_cluster_map": lambda: render_cluster_map(summary),
         "figure_08_top_journals": lambda: render_top_journals(summary),
         "figure_09_global_geography_of_ahr_research": lambda: render_global_geography(summary),
+        "figure_10_global_geography_of_ahr_research_per_capita": lambda: render_global_geography_per_capita(summary),
     }
     outputs = []
     for stem, renderer in renderers.items():
