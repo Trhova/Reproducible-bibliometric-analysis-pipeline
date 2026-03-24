@@ -655,34 +655,71 @@ def _draw_alluvial_ribbon(ax: plt.Axes, x0: float, x1: float, y0: tuple[float, f
     ax.add_patch(patch)
 
 
-def render_thematic_evolution(summary: dict) -> dict:
-    short_name = summary.get("project_short_name", "AhR")
-    cluster_period = pd.read_csv(TABLE_DIR / "cluster_period_shares.csv")
-    cluster_summary = pd.read_csv(TABLE_DIR / "cluster_summary.csv")
-    color_map = _cluster_color_map(cluster_summary)
-    periods = list(dict.fromkeys(cluster_period["time_slice"]))
-    recent_order = (
-        cluster_period[cluster_period["time_slice"] == periods[-1]]
-        .sort_values("share", ascending=False)["cluster"]
-        .tolist()
-    )
-    order = recent_order
-    gap = 0.012
-    positions: dict[tuple[str, int], tuple[float, float]] = {}
+def _ordered_periods(values: pd.Series) -> list[str]:
+    return list(dict.fromkeys(values.tolist()))
+
+
+def _build_alluvial_positions(
+    data: pd.DataFrame,
+    *,
+    period_col: str,
+    category_col: str,
+    share_col: str,
+    order: list,
+    gap: float = 0.012,
+) -> dict[tuple[str, object], tuple[float, float]]:
+    positions: dict[tuple[str, object], tuple[float, float]] = {}
+    periods = _ordered_periods(data[period_col])
     for period in periods:
         period_df = (
-            cluster_period[cluster_period["time_slice"] == period]
-            .set_index("cluster")
+            data[data[period_col] == period]
+            .set_index(category_col)
             .reindex(order)
-            .fillna({"share": 0.0, "n_papers": 0, "period_total": 1})
+            .fillna({share_col: 0.0})
             .reset_index()
         )
         y_top = 1.0
         for _, row in period_df.iterrows():
-            share = float(row["share"])
+            share = float(row[share_col])
             y_bottom = y_top - share
-            positions[(period, int(row["cluster"]))] = (y_bottom, y_top)
+            positions[(period, row[category_col])] = (y_bottom, y_top)
             y_top = y_bottom - gap
+    return positions
+
+
+def _render_alluvial(
+    *,
+    data: pd.DataFrame,
+    summary: dict,
+    stem: str,
+    title: str,
+    subtitle: str,
+    period_col: str,
+    category_col: str,
+    share_col: str,
+    total_col: str,
+    category_order: list,
+    label_lookup: dict,
+    color_map: dict,
+    side_subtitle_lines: list[str],
+    recent_note_fmt: str,
+    methods_title: str,
+    methods_purpose: str,
+    methods_changes: list[str],
+    methods_analysis_steps: list[str],
+    methods_thresholds: list[str],
+    methods_plotting: list[str],
+    methods_interpretation: list[str],
+    methods_caveats: list[str],
+) -> dict:
+    periods = _ordered_periods(data[period_col])
+    positions = _build_alluvial_positions(
+        data,
+        period_col=period_col,
+        category_col=category_col,
+        share_col=share_col,
+        order=category_order,
+    )
 
     set_plot_style()
     fig = plt.figure(figsize=(14.0, 8.0))
@@ -694,11 +731,11 @@ def render_thematic_evolution(summary: dict) -> dict:
     for i in range(len(periods) - 1):
         p0 = periods[i]
         p1 = periods[i + 1]
-        for cluster in order:
-            _draw_alluvial_ribbon(ax, xs[i], xs[i + 1], positions[(p0, cluster)], positions[(p1, cluster)], color_map[int(cluster)])
+        for category in category_order:
+            _draw_alluvial_ribbon(ax, xs[i], xs[i + 1], positions[(p0, category)], positions[(p1, category)], color_map[category])
 
     for x, period in zip(xs, periods, strict=True):
-        period_total = int(cluster_period.loc[cluster_period["time_slice"] == period, "period_total"].iloc[0])
+        period_total = int(data.loc[data[period_col] == period, total_col].iloc[0])
         ax.text(x, 1.03, period, ha="center", fontsize=12.2, fontweight="semibold")
         ax.text(x, 0.995, f"{period_total:,} papers", ha="center", fontsize=9.4, color=BASE_COLORS["slate"])
         ax.add_patch(Rectangle((x - 0.03, 0), 0.06, 1.0, facecolor="#F5F5F5", edgecolor="#D8D0C2", linewidth=0.8, zorder=0))
@@ -707,65 +744,209 @@ def render_thematic_evolution(summary: dict) -> dict:
     ax.set_ylim(0, 1.08)
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_title(f"Thematic Evolution of {short_name} Research", loc="left", pad=14)
-    ax.text(
-        0.0,
-        1.01,
-        "Ribbon width shows the share of papers assigned to each thematic cluster within each era.",
-        transform=ax.transAxes,
-        fontsize=10.2,
-        color=BASE_COLORS["slate"],
-    )
+    ax.set_title(title, loc="left", pad=14)
+    ax.text(0.0, 1.01, subtitle, transform=ax.transAxes, fontsize=10.2, color=BASE_COLORS["slate"])
     for spine in ax.spines.values():
         spine.set_visible(False)
 
     side.axis("off")
     side.text(0.0, 0.98, "How to read this map", fontsize=12.2, fontweight="semibold", va="top")
-    side.text(0.0, 0.92, "Ribbon color: thematic cluster", fontsize=9.8, va="top")
-    side.text(0.0, 0.88, "Ribbon width: within-period cluster share", fontsize=9.8, va="top")
-    side.text(0.0, 0.84, "Columns: 1980-1999, 2000-2012, 2013-2026", fontsize=9.8, va="top")
-    side.text(0.0, 0.76, "Clusters tracked across time", fontsize=12.0, fontweight="semibold", va="top")
+    y = 0.92
+    for line in side_subtitle_lines:
+        side.text(0.0, y, line, fontsize=9.8, va="top")
+        y -= 0.04
+    side.text(0.0, 0.76, "Themes tracked across time", fontsize=12.0, fontweight="semibold", va="top")
     y = 0.71
     recent_period = periods[-1]
-    recent = cluster_period[cluster_period["time_slice"] == recent_period].set_index("cluster")
-    for _, row in cluster_summary.sort_values("n_papers", ascending=False).iterrows():
-        cluster = int(row["cluster"])
-        side.add_patch(Rectangle((0.0, y - 0.018), 0.04, 0.028, facecolor=color_map[cluster], edgecolor="none"))
-        side.text(0.055, y, f"Cluster {cluster}: {row['cluster_label']}", fontsize=9.5, va="center")
-        share = float(recent.loc[cluster, "share"]) if cluster in recent.index else 0.0
-        side.text(0.055, y - 0.036, f"Recent-era share: {share:.0%}", fontsize=8.6, color=BASE_COLORS["slate"])
+    recent = data[data[period_col] == recent_period].set_index(category_col)
+    for category in category_order:
+        side.add_patch(Rectangle((0.0, y - 0.018), 0.04, 0.028, facecolor=color_map[category], edgecolor="none"))
+        side.text(0.055, y, label_lookup[category], fontsize=9.5, va="center")
+        share = float(recent.loc[category, share_col]) if category in recent.index else 0.0
+        side.text(0.055, y - 0.036, recent_note_fmt.format(share=share), fontsize=8.6, color=BASE_COLORS["slate"])
         y -= 0.09
 
-    save_figure(fig, "figure_06_thematic_evolution")
+    save_figure(fig, stem)
     metadata = _methods_common(summary) | {
-        "title": f"Thematic Evolution of {short_name} Research",
-        "purpose": f"Shows how the major thematic clusters of the {short_name} field changed across early, middle, and recent eras.",
-        "changes": [
+        "title": methods_title,
+        "purpose": methods_purpose,
+        "changes": methods_changes,
+        "analysis_steps": methods_analysis_steps,
+        "thresholds": methods_thresholds,
+        "plotting": methods_plotting,
+        "interpretation": methods_interpretation,
+        "caveats": _methods_common(summary)["caveats"] + methods_caveats,
+    }
+    write_methods_file(METHODS_DIR / f"{stem}.md", metadata)
+    return metadata
+
+
+def render_thematic_evolution(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
+    cluster_period = pd.read_csv(TABLE_DIR / "cluster_period_shares.csv")
+    merge_map = {
+        "Environmental toxicology and liver response": "Environmental toxicology and liver response",
+        "Cancer and hormone signaling": "Cancer and hormone signaling",
+        "Immune-microbiome signaling": "Immune-microbiome signaling",
+        "T cell and cytokine regulation": "T cell and cytokine regulation",
+        "CYP1 enzyme induction and toxicology": "CYP1-centered toxicology and transcription",
+        "CYP1 toxicology and carcinogenesis": "CYP1-centered toxicology and transcription",
+        "ARNT-CYP1 transcriptional response": "CYP1-centered toxicology and transcription",
+    }
+    cluster_period["display_theme"] = cluster_period["cluster_label"].map(merge_map).fillna(cluster_period["cluster_label"])
+    display_period = (
+        cluster_period.groupby(["time_slice", "display_theme"], as_index=False)
+        .agg(
+            share=("share", "sum"),
+            n_papers=("n_papers", "sum"),
+            period_total=("period_total", "first"),
+        )
+    )
+    periods = _ordered_periods(display_period["time_slice"])
+    recent_period = periods[-1]
+    order = (
+        display_period[display_period["time_slice"] == recent_period]
+        .sort_values("share", ascending=False)["display_theme"]
+        .tolist()
+    )
+    palette = sns.color_palette("crest", n_colors=len(order))
+    color_map = {theme: palette[idx] for idx, theme in enumerate(order)}
+    label_lookup = {theme: theme for theme in order}
+
+    return _render_alluvial(
+        data=display_period,
+        summary=summary,
+        stem="figure_06_thematic_evolution",
+        title=f"Thematic Evolution of {short_name} Research",
+        subtitle="Ribbon width shows the share of papers assigned to each displayed theme within each era.",
+        period_col="time_slice",
+        category_col="display_theme",
+        share_col="share",
+        total_col="period_total",
+        category_order=order,
+        label_lookup=label_lookup,
+        color_map=color_map,
+        side_subtitle_lines=[
+            "Ribbon color: displayed theme",
+            "Ribbon width: within-period theme share",
+            "Columns: 1980-1999, 2000-2012, 2013-2026",
+        ],
+        recent_note_fmt="Recent-era share: {share:.0%}",
+        methods_title=f"Thematic Evolution of {short_name} Research",
+        methods_purpose=f"Shows how the major thematic clusters of the {short_name} field changed across early, middle, and recent eras.",
+        methods_changes=[
             "This figure replaces the earlier heatmap-style evolution view with an alluvial-style cluster-flow map.",
             f"The redesign makes the rise of microbiome, barrier, immune, and cancer-linked {short_name} themes easier to compare against older toxicology-centered themes.",
+            "Three closely related CYP1-centered unsupervised clusters were collapsed into one displayed super-theme to remove redundant toxicology labels and improve interpretability.",
         ],
-        "analysis_steps": [
+        methods_analysis_steps=[
             "Papers were clustered on TF-IDF concept profiles derived from normalized keyword, MeSH, and targeted title/abstract marker labels.",
             "The concept-profile matrix retained terms with min_df=20, max_df=0.25, and max_features=700 before TruncatedSVD reduction and MiniBatchKMeans clustering.",
             "Cluster assignments were counted within each of the three configured time slices.",
-            "Cluster counts were normalized by the number of papers in each period so ribbon widths represent within-period share rather than raw volume only.",
+            "For visualization, three related CYP1-oriented clusters were merged into one displayed super-theme after clustering because they represented adjacent toxicology/transcriptional neighborhoods with redundant labels.",
+            "Displayed theme counts were normalized by the number of papers in each period so ribbon widths represent within-period share rather than raw volume only.",
         ],
-        "thresholds": [
-            "Seven document clusters were retained as a readable thesis-scale thematic summary.",
-            "The alluvial order was fixed across periods so changes in ribbon width reflect thematic growth or contraction rather than re-sorting artifacts.",
+        methods_thresholds=[
+            "The underlying unsupervised document clustering retained seven clusters.",
+            "The displayed alluvial summary collapses those seven clusters into five readable super-themes by merging the three CYP1-centered clusters.",
+            "The alluvial order was fixed from the recent era so changes in ribbon width reflect thematic growth or contraction rather than re-sorting artifacts.",
         ],
-        "plotting": [
-            "Ribbon color encodes thematic cluster identity.",
-            "Ribbon width encodes the share of papers assigned to that cluster within a given period.",
+        methods_plotting=[
+            "Ribbon color encodes displayed thematic identity.",
+            "Ribbon width encodes the share of papers assigned to that displayed theme within a given period.",
             "Period headers include the number of papers in each era to make denominator changes explicit.",
+            "A side legend lists displayed theme labels and their share in the most recent era.",
         ],
-        "interpretation": [
-            "Expanding ribbons in the recent era indicate themes that gained relative prominence, such as microbiome, barrier, immune, and tryptophan-linked work.",
-            "Narrowing ribbons point to themes that became relatively less dominant as the field diversified.",
+        methods_interpretation=[
+            "Expanding ribbons in the recent era indicate displayed themes that gained relative prominence, such as microbiome, barrier, immune, and tryptophan-linked work.",
+            "Narrowing ribbons point to displayed themes that became relatively less dominant as the field diversified.",
         ],
-    }
-    write_methods_file(METHODS_DIR / "figure_06_thematic_evolution.md", metadata)
-    return metadata
+        methods_caveats=[
+            "Displayed theme labels are heuristic summaries assigned after unsupervised document clustering and should be interpreted as approximate thematic handles rather than fixed ontology classes.",
+            "The alluvial diagram tracks relative share within each era, so a ribbon can narrow even if the absolute number of papers in that theme still rose.",
+            "The CYP1 merge is a presentation-layer simplification intended to reduce redundant labels, not a rerun of the underlying clustering model.",
+        ],
+    )
+
+
+def render_disease_sankey(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
+    trends = pd.read_csv(TABLE_DIR / "disease_trends.csv")
+    if trends.empty:
+        return {}
+    top_categories = (
+        trends.groupby("category")["n_papers"]
+        .sum()
+        .sort_values(ascending=False)
+        .head(8)
+        .index
+        .tolist()
+    )
+    display = trends[trends["category"].isin(top_categories)].copy()
+    display["display_total"] = display.groupby("period")["share_within_period"].transform("sum")
+    display["display_share"] = display["share_within_period"] / display["display_total"]
+    periods = _ordered_periods(display["period"])
+    order = (
+        display[display["period"] == periods[-1]]
+        .sort_values("share_within_period", ascending=False)["category"]
+        .tolist()
+    )
+    palette = sns.color_palette("crest", n_colors=len(order))
+    color_map = {category: palette[idx] for idx, category in enumerate(order)}
+    label_lookup = {category: category for category in order}
+    return _render_alluvial(
+        data=display,
+        summary=summary,
+        stem="figure_06_1_disease_sankey",
+        title=f"Disease and Application Evolution of {short_name} Research",
+        subtitle="Ribbon width shows the relative composition of the most prevalent disease/application categories within each era.",
+        period_col="period",
+        category_col="category",
+        share_col="display_share",
+        total_col="period_total",
+        category_order=order,
+        label_lookup=label_lookup,
+        color_map=color_map,
+        side_subtitle_lines=[
+            "Ribbon color: disease/application category",
+            "Ribbon width: relative share among displayed categories",
+            "Same category framework as Figure 03",
+        ],
+        recent_note_fmt="Recent displayed share: {share:.0%}",
+        methods_title=f"Disease and Application Evolution of {short_name} Research",
+        methods_purpose=f"Shows how the most prevalent disease and application categories in the {short_name} corpus changed across early, middle, and recent eras using the same dictionary framework as Figure 03.",
+        methods_changes=[
+            "This is an added companion to Figure 03, using an alluvial-style display instead of a heatmap.",
+            "The figure reuses the disease/application dictionary framework so the temporal shifts are visually easier to compare as flowing category shares across eras.",
+        ],
+        methods_analysis_steps=[
+            "The same dictionary-based disease/application tags used for Figure 03 were counted within each configured time slice.",
+            "Papers could contribute to multiple categories because disease/application tagging is multi-label.",
+            "Within each period, category counts were first normalized by the number of validated papers in that period, as in Figure 03.",
+            "Because the retained categories are multi-label and can overlap, the selected categories were then renormalized within each era so the alluvial widths sum to a readable composition across the displayed categories.",
+            "The eight largest categories by total tagged volume were retained for the alluvial view.",
+        ],
+        methods_thresholds=[
+            "Only the eight categories with the largest total tagged volume are shown to keep the alluvial readable.",
+            "The underlying category counts are period-normalized, but the displayed ribbon widths are renormalized across the retained categories within each era because multi-label categories do not form a strict partition.",
+            "The order was fixed from the recent era so ribbon-width changes are easier to compare.",
+        ],
+        methods_plotting=[
+            "Ribbon color encodes disease/application category identity.",
+            "Ribbon width encodes the relative share of the displayed categories within a given period rather than the raw multi-label share from Figure 03.",
+            "A side legend lists the retained categories and their recent-era shares.",
+            "The figure was exported as PNG, PDF, and SVG at 400 dpi.",
+        ],
+        methods_interpretation=[
+            "This figure is a dictionary-based application-landscape companion to the unsupervised thematic evolution map in Figure 06.",
+            "It makes the relative rise of immune/inflammation, microbiome/barrier, and other translational categories easier to compare directly against classic toxicology-heavy eras.",
+        ],
+        methods_caveats=[
+            "Because disease/application tags are multi-label, the raw shares from Figure 03 overlap and do not sum to 100% within a period.",
+            "This alluvial therefore shows the relative composition of the retained displayed categories, not the raw within-period paper share values printed in Figure 03.",
+            "This figure captures application framing rather than latent mechanistic document structure.",
+        ],
+    )
 
 
 def render_cluster_map(summary: dict) -> dict:
@@ -1260,6 +1441,7 @@ def render_all_figures(summary: dict, include: set[str] | None = None) -> list[d
             ],
         ),
         "figure_06_thematic_evolution": lambda: render_thematic_evolution(summary),
+        "figure_06_1_disease_sankey": lambda: render_disease_sankey(summary),
         "figure_07_thematic_cluster_map": lambda: render_cluster_map(summary),
         "figure_08_top_journals": lambda: render_top_journals(summary),
         "figure_09_global_geography_of_ahr_research": lambda: render_global_geography(summary),

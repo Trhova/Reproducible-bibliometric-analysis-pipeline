@@ -782,6 +782,7 @@ reporting:
     - "figure_04_keyword_network_all_corpus"
     - "figure_05_keyword_network_immune_barrier_microbiome"
     - "figure_06_thematic_evolution"
+    - "figure_06_1_disease_sankey"
     - "figure_07_thematic_cluster_map"
     - "figure_08_top_journals"
     - "figure_09_global_geography_of_ahr_research"

@@ -34,6 +34,7 @@ flowchart TD
 - figure_04_keyword_network_all_corpus: Conceptual Landscape of AhR Research
 - figure_05_keyword_network_immune_barrier_microbiome: Immune-Microbiome-Barrier AhR Sublandscape
 - figure_06_thematic_evolution: Thematic Evolution of AhR Research
+- figure_06_1_disease_sankey: Disease and Application Evolution of AhR Research
 - figure_07_thematic_cluster_map: Document Landscape of AhR Research Themes
 - figure_08_top_journals: Figure 08. Journals most frequently publishing AhR papers
 - figure_09_global_geography_of_ahr_research: Global AhR Research Output
