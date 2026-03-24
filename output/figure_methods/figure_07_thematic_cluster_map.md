@@ -17,8 +17,8 @@ Provides a document-level thematic landscape complementary to the term co-occurr
 - English-language articles and reviews were retained.
 - Titles, available abstracts, OpenAlex keywords, and MeSH descriptors were normalized after corpus retrieval.
 - Disease/application tagging still uses broad metadata support, but the upgraded landscape figures use curated concept labels derived from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching.
-- Text was lowercased, punctuation-normalized, and harmonized with editable synonym mappings in configs/synonyms.yaml.
-- Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt plus figure-specific concept exclusions were removed from map-style analyses.
+- Text was lowercased, punctuation-normalized, and harmonized with synonym mappings from the active project config.
+- Generic bibliometric and non-informative scientific terms from the active project config plus figure-specific concept exclusions were removed from map-style analyses.
 
 ## Analysis steps
 - Each paper was represented by a TF-IDF concept profile derived from normalized keyword, MeSH, and targeted title/abstract concept labels.
@@ -40,6 +40,6 @@ Provides a document-level thematic landscape complementary to the term co-occurr
 - This figure is a field-structure view rather than a citation or chronology map, so distances should be read qualitatively.
 
 ## Caveats
-- The corpus favors precision over total recall because ambiguous plain-AHR abstracts were not retrieved exhaustively.
+- The corpus favors precision over total recall because ambiguous plain-acronym records were not retrieved exhaustively.
 - OpenAlex abstract coverage is incomplete, so concept-map coverage partly depends on keyword and MeSH richness rather than abstract availability alone.
 - Dictionary-tagged disease/application assignments are approximate, multi-label, and sensitive to the editable regex dictionary.

@@ -75,8 +75,8 @@ def set_plot_style() -> None:
     mpl.rcParams.update(
         {
             "font.family": "DejaVu Serif",
-            "axes.facecolor": "#FBF9F4",
-            "figure.facecolor": "#FBF9F4",
+            "axes.facecolor": "#FFFFFF",
+            "figure.facecolor": "#FFFFFF",
             "axes.edgecolor": "#D6D2C4",
             "axes.labelcolor": BASE_COLORS["ink"],
             "text.color": BASE_COLORS["ink"],
@@ -510,7 +510,7 @@ def _draw_network_map(ax: plt.Axes, nodes: pd.DataFrame, edges: pd.DataFrame, cl
         nodes["y"],
         s=sizes,
         c=[color_map[int(cluster)] for cluster in nodes["cluster"]],
-        edgecolors="#FBF9F4",
+        edgecolors="#FFFFFF",
         linewidths=0.9,
         alpha=0.95,
         zorder=2,
@@ -531,7 +531,7 @@ def _draw_network_map(ax: plt.Axes, nodes: pd.DataFrame, edges: pd.DataFrame, cl
             ha="center",
             va="center",
             zorder=3,
-            bbox={"boxstyle": "round,pad=0.18", "fc": "#FBF9F4", "ec": "none", "alpha": 0.84},
+            bbox={"boxstyle": "round,pad=0.18", "fc": "#FFFFFF", "ec": "none", "alpha": 0.84},
         )
 
     ax.set_title(title, loc="left", pad=14)
@@ -558,7 +558,7 @@ def _draw_network_side_panel(ax: plt.Axes, nodes: pd.DataFrame, edges: pd.DataFr
     y_base = 0.74
     for idx, freq in enumerate(size_samples):
         size = 40 + 16 * np.sqrt(freq) + 90 * np.percentile(nodes["weighted_degree"], 60)
-        ax.scatter(0.12 + idx * 0.17, y_base, s=size, color="#AEB7C2", edgecolors="#FBF9F4", linewidths=0.9)
+        ax.scatter(0.12 + idx * 0.17, y_base, s=size, color="#AEB7C2", edgecolors="#FFFFFF", linewidths=0.9)
         ax.text(0.12 + idx * 0.17, y_base - 0.09, f"{freq} papers", ha="center", fontsize=8.9)
 
     ax.text(0.0, 0.63, "Thematic clusters", fontsize=12.0, fontweight="semibold", va="top")
@@ -701,7 +701,7 @@ def render_thematic_evolution(summary: dict) -> dict:
         period_total = int(cluster_period.loc[cluster_period["time_slice"] == period, "period_total"].iloc[0])
         ax.text(x, 1.03, period, ha="center", fontsize=12.2, fontweight="semibold")
         ax.text(x, 0.995, f"{period_total:,} papers", ha="center", fontsize=9.4, color=BASE_COLORS["slate"])
-        ax.add_patch(Rectangle((x - 0.03, 0), 0.06, 1.0, facecolor="#F2ECE0", edgecolor="#D8D0C2", linewidth=0.8, zorder=0))
+        ax.add_patch(Rectangle((x - 0.03, 0), 0.06, 1.0, facecolor="#F5F5F5", edgecolor="#D8D0C2", linewidth=0.8, zorder=0))
 
     ax.set_xlim(-0.25, 2.9)
     ax.set_ylim(0, 1.08)
@@ -842,7 +842,7 @@ def render_cluster_map(summary: dict) -> dict:
             ha="center",
             va="center",
             fontsize=9.6,
-            bbox={"boxstyle": "round,pad=0.24", "fc": "#FBF9F4", "ec": "none", "alpha": 0.88},
+            bbox={"boxstyle": "round,pad=0.24", "fc": "#FFFFFF", "ec": "none", "alpha": 0.88},
             zorder=2,
         )
 
@@ -1099,7 +1099,7 @@ def _render_geography_bubble_map(
             fontsize=8.6,
             ha="center",
             va="center",
-            bbox={"boxstyle": "round,pad=0.15", "fc": "#FBF9F4", "ec": "none", "alpha": 0.85},
+            bbox={"boxstyle": "round,pad=0.15", "fc": "#FFFFFF", "ec": "none", "alpha": 0.85},
             zorder=3,
         )
     handles = _size_handles(legend_values, panel_df[value_col])

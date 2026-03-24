@@ -13,8 +13,8 @@ Shows annual publication counts and the cumulative growth trajectory of the vali
 - English-language articles and reviews were retained.
 - Titles, available abstracts, OpenAlex keywords, and MeSH descriptors were normalized after corpus retrieval.
 - Disease/application tagging still uses broad metadata support, but the upgraded landscape figures use curated concept labels derived from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching.
-- Text was lowercased, punctuation-normalized, and harmonized with editable synonym mappings in configs/synonyms.yaml.
-- Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt plus figure-specific concept exclusions were removed from map-style analyses.
+- Text was lowercased, punctuation-normalized, and harmonized with synonym mappings from the active project config.
+- Generic bibliometric and non-informative scientific terms from the active project config plus figure-specific concept exclusions were removed from map-style analyses.
 
 ## Analysis steps
 - Papers were grouped by publication year.
@@ -36,8 +36,8 @@ Shows annual publication counts and the cumulative growth trajectory of the vali
 - Inflection points can be compared against historical shifts from toxicology-centric work toward immunity, microbiome, and cancer themes.
 
 ## Caveats
-- The corpus favors precision over total recall because ambiguous plain-AHR abstracts were not retrieved exhaustively.
+- The corpus favors precision over total recall because ambiguous plain-acronym records were not retrieved exhaustively.
 - OpenAlex abstract coverage is incomplete, so concept-map coverage partly depends on keyword and MeSH richness rather than abstract availability alone.
 - Dictionary-tagged disease/application assignments are approximate, multi-label, and sensitive to the editable regex dictionary.
-- The 2026 year-end estimate is a simple projection from papers indexed through March 21, 2026 and assumes roughly steady within-year accrual.
+- The 2026 year-end estimate is a simple projection from papers indexed through March 24, 2026 and assumes roughly steady within-year accrual.
 - OpenAlex indexing and validation timing are not uniform within a year, so the projected segment is intended to prevent a misleading visual dip rather than to serve as a forecast claim.

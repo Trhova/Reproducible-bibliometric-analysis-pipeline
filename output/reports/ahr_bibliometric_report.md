@@ -21,7 +21,7 @@ flowchart TD
     C --> D
     C --> E
     C --> F
-    classDef stage fill:#F6E7CF,stroke:#C8B79A,color:#1C2331,stroke-width:1px;
+    classDef stage fill:#FFFFFF,stroke:#C8B79A,color:#1C2331,stroke-width:1px;
     class A,B,C,D,E,F stage;
     linkStyle default stroke:#9B8A73,stroke-width:1.3px;
 ```

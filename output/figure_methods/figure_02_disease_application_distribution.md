@@ -12,9 +12,9 @@ Summarizes which disease and translational application areas appear most often i
 ## Preprocessing
 - English-language articles and reviews were retained.
 - Titles, available abstracts, OpenAlex keywords, and MeSH descriptors were normalized after corpus retrieval.
-- Title-plus-abstract text was used for the main term-network and clustering analyses after broader metadata trials produced noisier concept maps.
-- Text was lowercased, punctuation-normalized, and harmonized with editable synonym mappings in configs/synonyms.yaml.
-- Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt were removed from term-heavy analyses.
+- Disease/application tagging still uses broad metadata support, but the upgraded landscape figures use curated concept labels derived from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching.
+- Text was lowercased, punctuation-normalized, and harmonized with synonym mappings from the active project config.
+- Generic bibliometric and non-informative scientific terms from the active project config plus figure-specific concept exclusions were removed from map-style analyses.
 
 ## Analysis steps
 - Dictionary-based category tags were applied to each paper using normalized titles, available abstracts, keywords, MeSH descriptors, and topic labels.
@@ -34,6 +34,6 @@ Summarizes which disease and translational application areas appear most often i
 - It is useful for arguing whether thesis-relevant application areas are niche or mainstream branches within the wider AhR field.
 
 ## Caveats
-- The corpus favors precision over total recall because ambiguous plain-AHR abstracts were not retrieved exhaustively.
-- OpenAlex abstract coverage is incomplete, so title-only records remain in the corpus when they pass conservative validation.
+- The corpus favors precision over total recall because ambiguous plain-acronym records were not retrieved exhaustively.
+- OpenAlex abstract coverage is incomplete, so concept-map coverage partly depends on keyword and MeSH richness rather than abstract availability alone.
 - Dictionary-tagged disease/application assignments are approximate, multi-label, and sensitive to the editable regex dictionary.

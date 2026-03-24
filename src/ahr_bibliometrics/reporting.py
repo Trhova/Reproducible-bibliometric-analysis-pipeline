@@ -97,7 +97,7 @@ def mermaid_corpus_flow(steps: list[dict]) -> str:
         "    C --> D",
         "    C --> E",
         "    C --> F",
-        "    classDef stage fill:#F6E7CF,stroke:#C8B79A,color:#1C2331,stroke-width:1px;",
+        "    classDef stage fill:#FFFFFF,stroke:#C8B79A,color:#1C2331,stroke-width:1px;",
         "    class A,B,C,D,E,F stage;",
         "    linkStyle default stroke:#9B8A73,stroke-width:1.3px;",
     ]
@@ -203,7 +203,7 @@ def draw_corpus_flow_diagram(
                 boxstyle="round,pad=0.01,rounding_size=0.02",
                 linewidth=1.0,
                 edgecolor="#C8B79A",
-                facecolor="#F6E7CF",
+                facecolor="#FFFFFF",
             )
         )
         step = step_map[node]
@@ -256,7 +256,7 @@ def _draw_summary_page(pdf: PdfPages, inputs: dict) -> None:
     works = inputs["works"]
     disease_tagged = int(corpus.get("n_with_disease_tags", int((works["disease_tags"].fillna("") != "").sum())))
     focus_tagged = int(corpus.get("n_with_focus_tags", int((works["focus_tags"].fillna("") != "").sum())))
-    fig = plt.figure(figsize=(8.27, 11.69), facecolor="#FBF9F4")
+    fig = plt.figure(figsize=(8.27, 11.69), facecolor="#FFFFFF")
     ax = fig.add_axes([0, 0, 1, 1])
     ax.axis("off")
 
@@ -290,7 +290,7 @@ def _draw_summary_page(pdf: PdfPages, inputs: dict) -> None:
                 boxstyle="round,pad=0.005,rounding_size=0.008",
                 linewidth=0.6,
                 edgecolor="#D8D0C2",
-                facecolor="#F6F1E8" if idx % 2 == 0 else "#FBF9F4",
+                facecolor="#F8F8F8" if idx % 2 == 0 else "#FFFFFF",
             )
         )
         ax.text(0.08, y - 0.002, label, fontsize=10.5, color="#1C2331", va="center")
@@ -310,7 +310,7 @@ def _draw_summary_page(pdf: PdfPages, inputs: dict) -> None:
 
 
 def _draw_flow_page(pdf: PdfPages, inputs: dict, steps: list[dict]) -> None:
-    fig = plt.figure(figsize=(8.27, 11.69), facecolor="#FBF9F4")
+    fig = plt.figure(figsize=(8.27, 11.69), facecolor="#FFFFFF")
     ax = fig.add_axes([0.03, 0.05, 0.94, 0.90])
     draw_corpus_flow_diagram(
         ax,
@@ -328,7 +328,7 @@ def _draw_figure_page(pdf: PdfPages, stem: str) -> None:
     if not image_path.exists():
         return
     image = mpimg.imread(image_path)
-    fig = plt.figure(figsize=(8.27, 11.69), facecolor="#FBF9F4")
+    fig = plt.figure(figsize=(8.27, 11.69), facecolor="#FFFFFF")
     ax = fig.add_axes([0.04, 0.05, 0.92, 0.90])
     ax.imshow(image)
     ax.axis("off")

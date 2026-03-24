@@ -13,8 +13,8 @@ Shows where AhR research is produced globally using a clean bubble map of raw fr
 - English-language articles and reviews were retained.
 - Titles, available abstracts, OpenAlex keywords, and MeSH descriptors were normalized after corpus retrieval.
 - Disease/application tagging still uses broad metadata support, but the upgraded landscape figures use curated concept labels derived from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching.
-- Text was lowercased, punctuation-normalized, and harmonized with editable synonym mappings in configs/synonyms.yaml.
-- Generic bibliometric and non-informative scientific terms from configs/stopwords_terms.txt plus figure-specific concept exclusions were removed from map-style analyses.
+- Text was lowercased, punctuation-normalized, and harmonized with synonym mappings from the active project config.
+- Generic bibliometric and non-informative scientific terms from the active project config plus figure-specific concept exclusions were removed from map-style analyses.
 
 ## Analysis steps
 - Country attribution used the OpenAlex `authorships.countries` metadata already captured in the processed `countries` field.
@@ -37,7 +37,7 @@ Shows where AhR research is produced globally using a clean bubble map of raw fr
 - Large bubbles indicate countries that dominate the validated AhR literature in total volume.
 
 ## Caveats
-- The corpus favors precision over total recall because ambiguous plain-AHR abstracts were not retrieved exhaustively.
+- The corpus favors precision over total recall because ambiguous plain-acronym records were not retrieved exhaustively.
 - OpenAlex abstract coverage is incomplete, so concept-map coverage partly depends on keyword and MeSH richness rather than abstract availability alone.
 - Dictionary-tagged disease/application assignments are approximate, multi-label, and sensitive to the editable regex dictionary.
 - Geographic attribution depends on country metadata being present in OpenAlex authorships; papers lacking country metadata are excluded from the geography figure.
