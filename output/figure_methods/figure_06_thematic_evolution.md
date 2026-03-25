@@ -34,7 +34,7 @@ Shows how the major thematic clusters of the AhR field changed across early, mid
 - The alluvial order was fixed from the recent era so changes in ribbon width reflect thematic growth or contraction rather than re-sorting artifacts.
 
 ## Plotting settings
-- Ribbon color encodes displayed thematic identity.
+- Ribbon color encodes displayed thematic identity using a categorical palette chosen to maximize separation between themes.
 - Ribbon width encodes the share of papers assigned to that displayed theme within a given period.
 - Period headers include the number of papers in each era to make denominator changes explicit.
 - A side legend lists displayed theme labels and their share in the most recent era.

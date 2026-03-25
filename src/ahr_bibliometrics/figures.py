@@ -659,6 +659,25 @@ def _ordered_periods(values: pd.Series) -> list[str]:
     return list(dict.fromkeys(values.tolist()))
 
 
+def _alluvial_palette(n: int) -> list[str]:
+    base = [
+        "#2F6C8F",
+        "#C65C3B",
+        "#5E8F5B",
+        "#A87A2A",
+        "#7A5EA6",
+        "#C06C84",
+        "#3E9A94",
+        "#8C4F3D",
+        "#4B6FA8",
+        "#9A8C3C",
+    ]
+    if n <= len(base):
+        return base[:n]
+    extra = sns.color_palette("tab10", n_colors=n - len(base)).as_hex()
+    return base + extra
+
+
 def _build_alluvial_positions(
     data: pd.DataFrame,
     *,
@@ -809,7 +828,7 @@ def render_thematic_evolution(summary: dict) -> dict:
         .sort_values("share", ascending=False)["display_theme"]
         .tolist()
     )
-    palette = sns.color_palette("crest", n_colors=len(order))
+    palette = _alluvial_palette(len(order))
     color_map = {theme: palette[idx] for idx, theme in enumerate(order)}
     label_lookup = {theme: theme for theme in order}
 
@@ -852,7 +871,7 @@ def render_thematic_evolution(summary: dict) -> dict:
             "The alluvial order was fixed from the recent era so changes in ribbon width reflect thematic growth or contraction rather than re-sorting artifacts.",
         ],
         methods_plotting=[
-            "Ribbon color encodes displayed thematic identity.",
+            "Ribbon color encodes displayed thematic identity using a categorical palette chosen to maximize separation between themes.",
             "Ribbon width encodes the share of papers assigned to that displayed theme within a given period.",
             "Period headers include the number of papers in each era to make denominator changes explicit.",
             "A side legend lists displayed theme labels and their share in the most recent era.",
@@ -891,7 +910,7 @@ def render_disease_sankey(summary: dict) -> dict:
         .sort_values("share_within_period", ascending=False)["category"]
         .tolist()
     )
-    palette = sns.color_palette("crest", n_colors=len(order))
+    palette = _alluvial_palette(len(order))
     color_map = {category: palette[idx] for idx, category in enumerate(order)}
     label_lookup = {category: category for category in order}
     return _render_alluvial(
@@ -932,7 +951,7 @@ def render_disease_sankey(summary: dict) -> dict:
             "The order was fixed from the recent era so ribbon-width changes are easier to compare.",
         ],
         methods_plotting=[
-            "Ribbon color encodes disease/application category identity.",
+            "Ribbon color encodes disease/application category identity using a categorical palette chosen to maximize separation between categories.",
             "Ribbon width encodes the relative share of the displayed categories within a given period rather than the raw multi-label share from Figure 03.",
             "A side legend lists the retained categories and their recent-era shares.",
             "The figure was exported as PNG, PDF, and SVG at 400 dpi.",

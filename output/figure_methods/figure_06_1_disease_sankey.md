@@ -33,7 +33,7 @@ Shows how the most prevalent disease and application categories in the AhR corpu
 - The order was fixed from the recent era so ribbon-width changes are easier to compare.
 
 ## Plotting settings
-- Ribbon color encodes disease/application category identity.
+- Ribbon color encodes disease/application category identity using a categorical palette chosen to maximize separation between categories.
 - Ribbon width encodes the relative share of the displayed categories within a given period rather than the raw multi-label share from Figure 03.
 - A side legend lists the retained categories and their recent-era shares.
 - The figure was exported as PNG, PDF, and SVG at 400 dpi.
