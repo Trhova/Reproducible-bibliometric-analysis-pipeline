@@ -4,6 +4,6 @@ matplotlib>=3.8
 seaborn>=0.13
 networkx>=3.2
 scikit-learn>=1.4
+sentence-transformers>=3.0
 PyYAML>=6.0
 requests>=2.31
-

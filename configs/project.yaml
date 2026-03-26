@@ -770,6 +770,211 @@ analysis:
       disease_tags:
         - "Liver disease"
         - "Metabolic disease"
+  optional_products:
+    cancer_stance:
+      enabled: true
+      subset:
+        focus_tags:
+          - "cancer"
+        disease_tags:
+          - "Cancer"
+      use_title_fallback: true
+      year_bin_width: 5
+      rule_markers:
+        pro_tumor:
+          "growth and progression":
+            - "\\b(?:promot(?:e|es|ed|ing)|enhanc(?:e|es|ed|ing)|driv(?:e|es|en)|support(?:s|ed|ing))\\b.{0,50}\\b(?:tumou?r growth|tumou?r progression|cancer progression|carcinogenesis|proliferation)"
+            - "\\b(?:oncogenic|tumou?r promoting|pro carcinogenic|procarcinogenic)\\b"
+          "invasion and metastasis":
+            - "\\b(?:promot(?:e|es|ed|ing)|enhanc(?:e|es|ed|ing)|facilitat(?:e|es|ed|ing))\\b.{0,45}\\b(?:invasion|migration|metastasis|metastatic spread)"
+          "immune evasion and resistance":
+            - "\\b(?:immune evasion|tumou?r immune escape|therapy resistance|drug resistance|chemoresistance|radioresistance)\\b"
+            - "\\b(?:suppress(?:es|ed|ing)|attenuat(?:es|ed|ing))\\b.{0,12}\\b(?:anti tumor immunity|antitumor immunity|immune surveillance)"
+          "poor prognosis":
+            - "\\b(?:poor prognosis|worse survival|reduced survival|shorter survival|poor outcome)\\b"
+        anti_tumor:
+          "growth suppression":
+            - "\\b(?:suppress(?:es|ed|ing)|inhibit(?:s|ed|ing)|restrain(?:s|ed|ing)|limit(?:s|ed|ing)|attenuat(?:es|ed|ing))\\b.{0,50}\\b(?:tumou?r growth|tumou?r progression|cancer progression|carcinogenesis|proliferation)"
+            - "\\b(?:tumou?r suppress(?:or|ive)|anti tumou?r|anti tumou?rigenic|antitumou?r|antitumou?rigenic)\\b"
+          "anti-tumor immunity":
+            - "\\b(?:promot(?:e|es|ed|ing)|enhanc(?:e|es|ed|ing)|support(?:s|ed|ing))\\b.{0,45}\\b(?:anti tumou?r immunity|antitumou?r immunity|immune surveillance|cytotoxic t cell response)"
+          "apoptosis and clearance":
+            - "\\b(?:induc(?:e|es|ed|ing)|trigger(?:s|ed|ing))\\b.{0,45}\\b(?:apoptosis|tumou?r cell death|cancer cell death)"
+            - "\\b(?:prevent(?:s|ed|ing)|protect(?:s|ed|ing) against)\\b.{0,45}\\b(?:tumou?r formation|carcinogenesis|metastasis)"
+          "better prognosis":
+            - "\\b(?:better prognosis|improved survival|favorable prognosis|favourable prognosis|longer survival)\\b"
+        mixed_context:
+          "context dependence":
+            - "\\bcontext dependent\\b"
+            - "\\bcontext specific\\b"
+            - "\\bdepends on (?:the )?context\\b"
+            - "\\bdual role\\b"
+          "bidirectional framing":
+            - "\\bboth tumou?r suppress(?:ive|or) and tumou?r promot(?:ing|ive)\\b"
+            - "\\bcan be (?:either )?(?:pro tumou?r|anti tumou?r)\\b"
+            - "\\bparadoxical\\b.{0,30}\\brole\\b"
+      model:
+        enabled: true
+        model_name: "sentence-transformers/all-MiniLM-L6-v2"
+        batch_size: 32
+        min_text_chars: 80
+        max_chars: 1800
+        label_prototypes:
+          pro_tumor:
+            - "AhR promotes cancer progression, tumor growth, invasion, metastasis, immune evasion, or therapy resistance."
+            - "The paper frames AhR as oncogenic or tumor-promoting in cancer."
+          anti_tumor:
+            - "AhR suppresses tumor growth, restrains carcinogenesis, or supports anti-tumor immunity."
+            - "The paper frames AhR as protective or tumor-suppressive in cancer."
+          mixed_context:
+            - "The paper says AhR has a context-dependent or dual role in cancer."
+            - "AhR is described as having both tumor-promoting and tumor-suppressive effects depending on context."
+          unclear:
+            - "The paper mentions AhR and cancer but does not clearly state whether AhR is pro-tumor or anti-tumor."
+            - "The role of AhR in cancer is discussed without a clear directional framing."
+    phrase_map:
+      enabled: true
+      min_phrase_docs: 120
+      max_phrases: 40
+      min_edge_count: 20
+      min_edge_weight: 0.12
+      phrase_patterns:
+        "cancer":
+          - "\\bcancer\\b"
+          - "\\btumou?r\\b"
+          - "\\bcarcinoma\\b"
+        "breast cancer":
+          - "\\bbreast cancer\\b"
+          - "\\bmammary tumou?r\\b"
+        "tumor immunity":
+          - "\\btumou?r immunity\\b"
+          - "\\bantitumou?r immunity\\b"
+          - "\\banti tumou?r immunity\\b"
+        "tumor microenvironment":
+          - "\\btumou?r microenvironment\\b"
+        "immune checkpoint":
+          - "\\bimmune checkpoint\\b"
+          - "\\bpd 1\\b"
+          - "\\bpd l1\\b"
+        "estrogen receptor":
+          - "\\bestrogen receptor\\b"
+          - "\\ber alpha\\b"
+        "microbiome":
+          - "\\bmicrobiome\\b"
+          - "\\bmicrobiota\\b"
+          - "\\bgut microbiome\\b"
+        "intestinal barrier":
+          - "\\bintestinal barrier\\b"
+          - "\\bgut barrier\\b"
+          - "\\bbarrier function\\b"
+          - "\\bmucosal barrier\\b"
+        "mucosal immunity":
+          - "\\bmucosal immunity\\b"
+          - "\\bmucosal immune\\b"
+        "inflammatory bowel disease":
+          - "\\binflammatory bowel disease\\b"
+          - "\\bulcerative colitis\\b"
+          - "\\bcrohn\\b"
+        "colitis":
+          - "\\bcolitis\\b"
+        "immune regulation":
+          - "\\bimmune regulation\\b"
+          - "\\bimmune response\\b"
+          - "\\bimmune signaling\\b"
+        "inflammation":
+          - "\\binflamm"
+        "Treg cells":
+          - "\\btreg\\b"
+          - "\\bregulatory t cells?\\b"
+          - "\\bfoxp3\\b"
+        "Th17 cells":
+          - "\\bth17\\b"
+          - "\\binterleukin 17\\b"
+        "IL-22":
+          - "\\bil 22\\b"
+          - "\\binterleukin 22\\b"
+        "IL-17":
+          - "\\bil 17\\b"
+          - "\\binterleukin 17\\b"
+        "tryptophan metabolism":
+          - "\\btryptophan metabolism\\b"
+          - "\\btryptophan catabol"
+          - "\\btryptophan pathway\\b"
+        "kynurenine pathway":
+          - "\\bkynurenine pathway\\b"
+          - "\\bkynurenine\\b"
+        "indoles":
+          - "\\bindoles?\\b"
+          - "\\bindole derivatives?\\b"
+        "IDO1":
+          - "\\bido1\\b"
+          - "\\bindoleamine 2 3 dioxygenase\\b"
+        "CYP1A1":
+          - "\\bcyp1a1\\b"
+        "CYP1B1":
+          - "\\bcyp1b1\\b"
+        "ARNT":
+          - "\\barnt\\b"
+          - "\\bnuclear translocator\\b"
+        "cytochrome P450":
+          - "\\bcytochrome p450\\b"
+          - "\\bp450\\b"
+        "dioxin / TCDD":
+          - "\\bdioxin\\b"
+          - "\\btcdd\\b"
+        "PAHs":
+          - "\\bpahs?\\b"
+          - "\\bpolycyclic aromatic hydrocarbons?\\b"
+        "xenobiotic metabolism":
+          - "\\bxenobiotic\\b"
+          - "\\bxenobiotic metabolism\\b"
+        "environmental exposure":
+          - "\\benvironmental exposure\\b"
+          - "\\bpollutant\\b"
+        "liver disease":
+          - "\\bliver\\b"
+          - "\\bhepatic\\b"
+          - "\\bhepatitis\\b"
+        "hepatocellular carcinoma":
+          - "\\bhepatocellular carcinoma\\b"
+          - "\\bhcc\\b"
+        "metabolism":
+          - "\\bmetabolism\\b"
+          - "\\bmetabolic\\b"
+        "obesity and diabetes":
+          - "\\bobesity\\b"
+          - "\\bdiabetes\\b"
+          - "\\binsulin resistance\\b"
+        "skin disease":
+          - "\\bpsoriasis\\b"
+          - "\\bdermatitis\\b"
+          - "\\beczema\\b"
+        "infection":
+          - "\\binfection\\b"
+          - "\\binfectious\\b"
+          - "\\bpathogen\\b"
+        "oxidative stress":
+          - "\\boxidative stress\\b"
+          - "\\breactive oxygen species\\b"
+        "apoptosis":
+          - "\\bapoptosis\\b"
+        "fibrosis":
+          - "\\bfibrosis\\b"
+        "stemness":
+          - "\\bstemness\\b"
+          - "\\bcancer stem cells?\\b"
+        "metastasis":
+          - "\\bmetastasis\\b"
+          - "\\bmetastatic\\b"
+        "barrier permeability":
+          - "\\bpermeability\\b"
+          - "\\bepithelial permeability\\b"
+        "gut":
+          - "\\bgut\\b"
+          - "\\bintestinal\\b"
+        "microbial metabolites":
+          - "\\bmicrobial metabolites?\\b"
+          - "\\bcommensal metabolites?\\b"
 
 reporting:
   report_title: "Bibliometric Analysis Summary Report"

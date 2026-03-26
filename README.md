@@ -68,6 +68,7 @@ That config contains:
 - disease/application dictionaries
 - time slices, focus subsets, and report figure order
 - topic-specific concept-cleaning resources used by the advanced map figures
+- optional-product settings for exploratory analyses such as cancer stance screening and phrase-level co-occurrence maps
 
 ## Included example: AhR
 
@@ -105,6 +106,14 @@ make figures
 make report
 ```
 
+Render optional figures on demand without changing the default report order:
+
+```bash
+PYTHONPATH=src python3 -m bibliometric_pipeline.cli figures --include \
+  figure_11_cancer_stance_over_time \
+  figure_12_global_phrase_map
+```
+
 The generic CLI entrypoint is:
 
 ```bash
@@ -124,6 +133,8 @@ The reporting step builds a combined PDF report in `output/reports/` that includ
 - a summary page with key corpus statistics
 - a corpus filtering / retention overview
 - all generated figures in configured order
+
+Optional figures can be generated and documented without adding them to the default report. To include them in the combined PDF, append their stems to `reporting.figure_order` in the active config.
 
 The same step also writes Mermaid corpus-flow assets so the retention diagram can be reused in documentation or thesis materials.
 
@@ -145,3 +156,4 @@ For simple use cases, editing the query, validation, aliases, and stopwords may 
 - The advanced term-map figures are deliberately pruned for readability rather than exhaustiveness.
 - OpenAlex abstract coverage is incomplete, so some analyses rely on titles plus available metadata rather than abstracts alone.
 - Dictionary-based disease/application tagging is approximate and multi-label by design.
+- The cancer stance analysis is intentionally conservative: rule-based abstract/title framing is the primary result, while the local sentence-transformer layer is only a sensitivity check.

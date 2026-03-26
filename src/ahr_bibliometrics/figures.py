@@ -10,11 +10,12 @@ from matplotlib.patches import Ellipse, PathPatch, Polygon, Rectangle
 from matplotlib.path import Path
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.ticker import PercentFormatter
 import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from .config import FIGURE_DIR, METHODS_DIR, RAW_DIR, TABLE_DIR
+from .config import FIGURE_DIR, METHODS_DIR, RAW_DIR, TABLE_DIR, load_project_config
 from .methods import write_methods_file
 from .reporting import build_corpus_flow_steps, draw_corpus_flow_diagram, load_report_inputs
 
@@ -546,13 +547,21 @@ def _draw_network_map(ax: plt.Axes, nodes: pd.DataFrame, edges: pd.DataFrame, cl
         spine.set_visible(False)
 
 
-def _draw_network_side_panel(ax: plt.Axes, nodes: pd.DataFrame, edges: pd.DataFrame, clusters: pd.DataFrame) -> None:
+def _draw_network_side_panel(
+    ax: plt.Axes,
+    nodes: pd.DataFrame,
+    edges: pd.DataFrame,
+    clusters: pd.DataFrame,
+    *,
+    node_size_label: str = "number of papers carrying the concept",
+    edge_label: str = "co-occurrence strength between concept labels",
+) -> None:
     ax.axis("off")
     color_map = _cluster_color_map(clusters)
     ax.text(0.0, 0.98, "How to read this map", fontsize=12.2, fontweight="semibold", va="top")
-    ax.text(0.0, 0.92, "Node size: number of papers carrying the concept", fontsize=9.8, va="top")
+    ax.text(0.0, 0.92, f"Node size: {node_size_label}", fontsize=9.8, va="top")
     ax.text(0.0, 0.88, "Node color: thematic cluster from Louvain community detection", fontsize=9.8, va="top")
-    ax.text(0.0, 0.84, "Edge width: co-occurrence strength between concept labels", fontsize=9.8, va="top")
+    ax.text(0.0, 0.84, f"Edge width: {edge_label}", fontsize=9.8, va="top")
 
     size_samples = np.percentile(nodes["frequency"], [35, 65, 90]).astype(int)
     y_base = 0.74
@@ -584,6 +593,10 @@ def render_concept_map(
     subset_note: str,
     changes: list[str],
     threshold_notes: list[str],
+    node_size_label: str = "number of papers carrying the concept",
+    edge_label: str = "co-occurrence strength between concept labels",
+    analysis_intro: str = "Concept labels were built from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching rather than raw free-text tokens.",
+    interpretation_lead: str | None = None,
 ) -> dict:
     short_name = summary.get("project_short_name", "AhR")
     nodes = pd.read_csv(TABLE_DIR / nodes_file)
@@ -595,7 +608,14 @@ def render_concept_map(
     ax_map = fig.add_subplot(gs[0, 0])
     ax_side = fig.add_subplot(gs[0, 1])
     _draw_network_map(ax_map, nodes, edges, clusters, title, subtitle)
-    _draw_network_side_panel(ax_side, nodes, edges, clusters)
+    _draw_network_side_panel(
+        ax_side,
+        nodes,
+        edges,
+        clusters,
+        node_size_label=node_size_label,
+        edge_label=edge_label,
+    )
     save_figure(fig, stem)
 
     metadata = _methods_common(summary) | {
@@ -603,7 +623,7 @@ def render_concept_map(
         "purpose": purpose,
         "changes": changes,
         "analysis_steps": [
-            "Concept labels were built from normalized OpenAlex keywords, MeSH descriptors, and targeted title/abstract marker matching rather than raw free-text tokens.",
+            analysis_intro,
             subset_note,
             "Concept co-occurrence was computed at the paper level and weighted by association strength using co-occurrence divided by the geometric mean of individual concept frequencies.",
             "Louvain community detection defined thematic clusters, and a cluster-aware force layout positioned nodes to emphasize the separation of conceptual regions.",
@@ -619,7 +639,7 @@ def render_concept_map(
             "Translucent cluster envelopes and a dedicated side legend panel were added to make the map legible without referring back to the methods.",
         ],
         "interpretation": [
-            f"This figure should be read as a conceptual landscape of the {short_name} field rather than as a comprehensive display of every detectable term.",
+            interpretation_lead or f"This figure should be read as a conceptual landscape of the {short_name} field rather than as a comprehensive display of every detectable term.",
             "Clusters summarize high-salience thematic neighborhoods and the bridging edges between them.",
         ],
     }
@@ -1414,6 +1434,142 @@ def render_global_geography_per_capita(summary: dict) -> dict:
     )
 
 
+def render_cancer_stance(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
+    trends = pd.read_csv(TABLE_DIR / "cancer_stance_trends.csv")
+    labels = pd.read_csv(TABLE_DIR / "cancer_stance_labels.csv")
+    stance_summary = json.loads((TABLE_DIR / "cancer_stance_summary.json").read_text(encoding="utf-8"))
+    if trends.empty:
+        return {}
+
+    trends["bin_start"] = trends["time_bin"].str.split("-").str[0].astype(int)
+    trends = trends.sort_values(["bin_start", "rule_label"])
+    order = ["anti_tumor", "pro_tumor", "mixed_context", "unclear"]
+    label_lookup = {
+        "anti_tumor": "Anti-tumor framing",
+        "pro_tumor": "Pro-tumor framing",
+        "mixed_context": "Mixed / context-dependent",
+        "unclear": "Unclear",
+    }
+    color_map = {
+        "anti_tumor": BASE_COLORS["teal"],
+        "pro_tumor": BASE_COLORS["brick"],
+        "mixed_context": BASE_COLORS["ochre"],
+        "unclear": "#A8AFBA",
+    }
+    totals = trends[["time_bin", "bin_total", "bin_start"]].drop_duplicates().sort_values("bin_start")
+
+    set_plot_style()
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(11.8, 8.1),
+        sharex=True,
+        gridspec_kw={"height_ratios": [3.0, 1.0], "hspace": 0.08},
+    )
+    for label in order:
+        subset = trends[trends["rule_label"] == label].copy()
+        subset = totals[["time_bin", "bin_start"]].merge(
+            subset[["time_bin", "share"]],
+            on="time_bin",
+            how="left",
+        ).fillna({"share": 0.0})
+        axes[0].plot(
+            subset["bin_start"],
+            subset["share"],
+            color=color_map[label],
+            linewidth=2.6,
+            marker="o",
+            markersize=4.8,
+            label=label_lookup[label],
+        )
+    axes[0].set_ylim(0, 1.0)
+    axes[0].yaxis.set_major_formatter(PercentFormatter(1.0))
+    axes[0].set_ylabel("Share of cancer subset")
+    axes[0].set_title(f"How {short_name} Is Framed in Cancer-Focused Literature", loc="left", pad=12)
+    axes[0].text(
+        0.0,
+        1.01,
+        f"Cancer-related subset: {stance_summary['n_cancer_subset']:,} papers; abstracts available for {stance_summary['n_with_abstract']:,} ({stance_summary['abstract_coverage']:.0%}).",
+        transform=axes[0].transAxes,
+        fontsize=10.1,
+        color=BASE_COLORS["slate"],
+    )
+    axes[0].legend(ncol=2, loc="upper left", fontsize=9.1, frameon=False)
+
+    axes[1].bar(totals["bin_start"], totals["bin_total"], width=3.7, color=BASE_COLORS["slate"], alpha=0.82)
+    axes[1].set_ylabel("Papers")
+    axes[1].set_xlabel("Publication period (5-year bins)")
+    axes[1].set_xticks(totals["bin_start"])
+    axes[1].set_xticklabels(totals["time_bin"], rotation=40, ha="right")
+
+    for ax in axes:
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.grid(axis="y")
+
+    save_figure(fig, "figure_11_cancer_stance_over_time")
+    metadata = _methods_common(summary) | {
+        "title": f"Figure 11. How {short_name} is framed in cancer-focused literature over time",
+        "purpose": f"Summarizes whether cancer-focused {short_name} papers frame the receptor as pro-tumor, anti-tumor, mixed/context-dependent, or unclear, and how that framing shifts over time.",
+        "analysis_steps": [
+            "The validated corpus was filtered to papers carrying either the `Cancer` disease tag or the `cancer` focus tag.",
+            "Rule-based stance assignment used normalized abstracts as the primary evidence source, with title fallback only when the abstract did not provide a directional signal.",
+            "Explicit marker sets captured pro-tumor language, anti-tumor language, and mixed/context-dependent framing.",
+            "Papers with no interpretable directional language were left as `Unclear` rather than forcing a polarity label.",
+            "For a secondary sensitivity check, an open-source sentence-transformer compared abstract/title text against prototype stance descriptions and the agreement rate was summarized against the rule-based labels.",
+            "Counts were aggregated in fixed five-year bins and converted to within-bin shares for plotting.",
+        ],
+        "thresholds": [
+            f"The cancer-focused subset contained {stance_summary['n_cancer_subset']:,} papers, of which {stance_summary['n_with_abstract']:,} ({stance_summary['abstract_coverage']:.0%}) had abstracts.",
+            "The primary figure uses the rule-based labels only; the model-assisted layer is exploratory and is included as a sensitivity check rather than the thesis-default claim.",
+            "Papers with model text shorter than the configured threshold were not scored by the embedding model.",
+        ],
+        "plotting": [
+            "Colored lines show the within-bin share of cancer-focused papers assigned to each stance class.",
+            "A lower bar panel shows the number of cancer-focused papers in each bin so denominator changes remain visible.",
+            "Anti-tumor and pro-tumor classes use contrasting teal and brick colors, while mixed/context-dependent and unclear are de-emphasized with ochre and gray.",
+        ],
+        "interpretation": [
+            "This figure should be read as a literature-framing analysis of abstracts and titles, not a direct vote on the true biological role of AhR in cancer.",
+            "Rising `mixed / context-dependent` share would indicate that the literature increasingly emphasizes tumor-type, ligand, or immune-context specificity rather than a single universal role.",
+        ],
+        "caveats": _methods_common(summary)["caveats"] + [
+            "Stance labels are based on explicit language in titles and abstracts, so papers that imply a directional role without stating it clearly can remain `Unclear`.",
+            "The model-assisted comparison is not a manually validated gold standard; it is a semantic sensitivity analysis intended to show whether a local open-source model broadly agrees with the rule-based calls.",
+            "Abstract coverage is incomplete, so some cancer-focused papers can only be classified from titles or not scored by the model layer at all.",
+        ],
+    }
+    write_methods_file(METHODS_DIR / "figure_11_cancer_stance_over_time.md", metadata)
+    return metadata
+
+
+def render_phrase_map(summary: dict) -> dict:
+    short_name = summary.get("project_short_name", "AhR")
+    return render_concept_map(
+        summary,
+        nodes_file="phrase_network_nodes.csv",
+        edges_file="phrase_network_edges.csv",
+        clusters_file="phrase_network_clusters.csv",
+        stem="figure_12_global_phrase_map",
+        title=f"Paired-Topic Phrase Map of {short_name} Research",
+        subtitle=f"Title-and-abstract phrase co-occurrence map showing the major topics most often paired with {short_name}",
+        purpose=f"Maps the phrase-level topics most commonly paired with {short_name} across the full validated corpus using title-and-abstract phrase markers rather than metadata concepts.",
+        subset_note=f"The full validated {short_name} corpus was used, but only title-and-abstract phrase hits were allowed to enter the map.",
+        changes=[
+            f"This is a new optional figure designed to answer what topics are most commonly paired with {short_name} in the literature.",
+            "Unlike Figures 04 and 05, the phrase map is driven by recurring title-and-abstract phrases rather than the broader keyword/MeSH concept layer.",
+        ],
+        threshold_notes=[
+            "Only configured phrase markers observed in at least the configured minimum number of papers were eligible for display.",
+            "Edges were retained only when phrase pairs passed the configured minimum co-occurrence count and association-strength threshold.",
+        ],
+        node_size_label="number of papers carrying the retained phrase",
+        edge_label="co-occurrence strength between retained phrases within the same paper",
+        analysis_intro="Phrase labels were built from configured title-and-abstract marker patterns designed to capture recurring AhR-paired topics in human-readable phrase form.",
+        interpretation_lead=f"This figure should be read as a literature-derived map of the topics most often paired with {short_name}, not as a map of real search-engine behavior.",
+    )
+
+
 def render_all_figures(summary: dict, include: set[str] | None = None) -> list[dict]:
     short_name = summary.get("project_short_name", "AhR")
     renderers = {
@@ -1465,9 +1621,16 @@ def render_all_figures(summary: dict, include: set[str] | None = None) -> list[d
         "figure_08_top_journals": lambda: render_top_journals(summary),
         "figure_09_global_geography_of_ahr_research": lambda: render_global_geography(summary),
         "figure_10_global_geography_of_ahr_research_per_capita": lambda: render_global_geography_per_capita(summary),
+        "figure_11_cancer_stance_over_time": lambda: render_cancer_stance(summary),
+        "figure_12_global_phrase_map": lambda: render_phrase_map(summary),
     }
     outputs = []
-    for stem, renderer in renderers.items():
+    if include is None:
+        stems_to_render = load_project_config().get("reporting", {}).get("figure_order", list(renderers))
+    else:
+        stems_to_render = [stem for stem in renderers if stem in include]
+    for stem in stems_to_render:
+        renderer = renderers[stem]
         if include is None or stem in include:
             outputs.append(renderer())
     return outputs

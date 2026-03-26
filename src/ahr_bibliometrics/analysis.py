@@ -13,6 +13,11 @@ from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
 
 from .config import TABLE_DIR, load_project_config, load_synonyms_config, save_json
 from .io_utils import slugify
+from .optional_analyses import (
+    build_cancer_stance_outputs,
+    build_phrase_documents,
+    phrase_map_settings,
+)
 from .text_processing import apply_alias_replacements, build_alias_map, normalize_text, parse_pipe_list
 
 
@@ -344,6 +349,10 @@ def _term_evolution_trackers() -> list[str]:
 
 def _analysis_stopwords(stopwords: set[str]) -> list[str]:
     return sorted(set(stopwords) | set(ENGLISH_STOP_WORDS))
+
+
+def _optional_products() -> dict:
+    return _analysis_settings().get("optional_products", {})
 
 
 def load_works(path: str | None = None) -> pd.DataFrame:
@@ -695,6 +704,98 @@ def build_network_tables(works: pd.DataFrame, subset_name: str) -> tuple[pd.Data
     return nodes_df, edges_df, clusters_df
 
 
+def build_phrase_network_tables(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    settings = phrase_map_settings()
+    docs = build_phrase_documents(works)
+    doc_counter = Counter()
+    pair_counter = Counter()
+    for phrases in docs:
+        filtered = sorted(set(phrases))
+        for phrase in filtered:
+            doc_counter[phrase] += 1
+        for source, target in combinations(filtered, 2):
+            pair_counter[(source, target)] += 1
+
+    min_docs = int(settings.get("min_phrase_docs", 90))
+    max_nodes = int(settings.get("max_phrases", 40))
+    min_edge_count = int(settings.get("min_edge_count", 18))
+    min_edge_weight = float(settings.get("min_edge_weight", 0.11))
+    candidate_phrases = [phrase for phrase, count in doc_counter.items() if count >= min_docs]
+    top_phrases = sorted(candidate_phrases, key=lambda phrase: (-doc_counter[phrase], phrase))[:max_nodes]
+    top_phrase_set = set(top_phrases)
+
+    graph = nx.Graph()
+    for phrase in top_phrases:
+        graph.add_node(phrase, frequency=doc_counter[phrase])
+    for (source, target), count in pair_counter.items():
+        if source not in top_phrase_set or target not in top_phrase_set:
+            continue
+        weight = count / float(np.sqrt(doc_counter[source] * doc_counter[target]))
+        if count < min_edge_count or weight < min_edge_weight:
+            continue
+        graph.add_edge(source, target, weight=weight, count=count)
+
+    if graph.number_of_nodes() == 0:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    graph.remove_nodes_from(list(nx.isolates(graph)))
+    communities = list(nx.community.louvain_communities(graph, weight="weight", seed=RANDOM_STATE))
+    cluster_map = {}
+    cluster_rows = []
+    for idx, community in enumerate(sorted(communities, key=len, reverse=True), start=1):
+        ranked_terms = sorted(
+            community,
+            key=lambda phrase: (-(graph.degree(phrase, weight="weight")), -graph.nodes[phrase]["frequency"], phrase),
+        )
+        top_terms_cluster = ranked_terms[:5]
+        label_terms = ranked_terms[:10]
+        label = _cluster_label(label_terms)
+        for node in community:
+            cluster_map[node] = idx
+        cluster_rows.append(
+            {
+                "cluster": idx,
+                "cluster_label": label,
+                "top_terms": " | ".join(top_terms_cluster),
+                "n_terms": len(community),
+                "total_frequency": int(sum(graph.nodes[node]["frequency"] for node in community)),
+            }
+        )
+
+    positions = _network_layout(graph, cluster_map)
+    nodes = []
+    for node in graph.nodes():
+        nodes.append(
+            {
+                "term": node,
+                "x": positions[node][0],
+                "y": positions[node][1],
+                "frequency": int(graph.nodes[node]["frequency"]),
+                "cluster": cluster_map[node],
+                "degree": int(graph.degree(node)),
+                "weighted_degree": float(graph.degree(node, weight="weight")),
+                "cluster_label": next(row["cluster_label"] for row in cluster_rows if row["cluster"] == cluster_map[node]),
+            }
+        )
+    edges = []
+    for source, target, data in graph.edges(data=True):
+        edges.append(
+            {
+                "source": source,
+                "target": target,
+                "weight": float(data["weight"]),
+                "count": int(data["count"]),
+                "source_cluster": cluster_map[source],
+                "target_cluster": cluster_map[target],
+            }
+        )
+
+    nodes_df = pd.DataFrame(nodes).sort_values(["cluster", "weighted_degree", "frequency"], ascending=[True, False, False])
+    edges_df = pd.DataFrame(edges).sort_values(["weight", "count"], ascending=[False, False])
+    clusters_df = pd.DataFrame(cluster_rows).sort_values("cluster")
+    return nodes_df, edges_df, clusters_df
+
+
 def build_cluster_summary(works: pd.DataFrame, stopwords: set[str]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     docs, concept_doc_strings = _concept_documents(works)
     alias_to_token, normalizations = _concept_resources()
@@ -884,6 +985,29 @@ def write_analysis_outputs(works: pd.DataFrame, stopwords: set[str]) -> dict:
     country_activity.to_csv(TABLE_DIR / "country_activity.csv", index=False)
     country_theme.to_csv(TABLE_DIR / "country_theme_profiles.csv", index=False)
     save_json(TABLE_DIR / "geography_summary.json", geography_summary)
+
+    optional_products = _optional_products()
+    if optional_products.get("cancer_stance", {}).get("enabled", False):
+        stance_labels, stance_trends, stance_comparison, stance_summary = build_cancer_stance_outputs(works)
+        stance_labels.to_csv(TABLE_DIR / "cancer_stance_labels.csv", index=False)
+        stance_trends.to_csv(TABLE_DIR / "cancer_stance_trends.csv", index=False)
+        stance_comparison.to_csv(TABLE_DIR / "cancer_stance_model_comparison.csv", index=False)
+        save_json(TABLE_DIR / "cancer_stance_summary.json", stance_summary)
+
+    if optional_products.get("phrase_map", {}).get("enabled", False):
+        phrase_nodes, phrase_edges, phrase_clusters = build_phrase_network_tables(works)
+        phrase_nodes.to_csv(TABLE_DIR / "phrase_network_nodes.csv", index=False)
+        phrase_edges.to_csv(TABLE_DIR / "phrase_network_edges.csv", index=False)
+        phrase_clusters.to_csv(TABLE_DIR / "phrase_network_clusters.csv", index=False)
+        save_json(
+            TABLE_DIR / "phrase_network_summary.json",
+            {
+                "n_nodes": int(len(phrase_nodes)),
+                "n_edges": int(len(phrase_edges)),
+                "n_clusters": int(phrase_clusters["cluster"].nunique()) if not phrase_clusters.empty else 0,
+                "min_phrase_docs": int(phrase_map_settings().get("min_phrase_docs", 90)),
+            },
+        )
 
     summary = {
         "n_papers": int(works["id"].nunique()),
