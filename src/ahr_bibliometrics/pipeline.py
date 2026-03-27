@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import re
 
 import pandas as pd
 
-from .analysis import load_works, write_analysis_outputs
+from .analysis import TABLE_DIR, load_works, write_analysis_outputs
 from .config import (
     ensure_directories,
     load_disease_dictionary,
@@ -19,6 +20,7 @@ from .config import (
 from .figures import render_all_figures
 from .io_utils import read_jsonl_gz, write_jsonl_gz
 from .openalex import OpenAlexClient
+from .optional_analyses import build_cancer_stance_outputs
 from .reporting import build_summary_report
 from .text_processing import (
     apply_alias_replacements,
@@ -228,6 +230,19 @@ def analyze_data() -> dict:
     stopwords = load_stopwords()
     works = load_works(str(project_paths().works))
     return write_analysis_outputs(works, stopwords)
+
+
+def analyze_cancer_stance_only() -> dict:
+    works_path = Path(project_paths().works)
+    if not works_path.exists():
+        raise FileNotFoundError("Missing processed works table; run preprocess first.")
+    works = load_works(str(works_path))
+    labels, trends, comparison, summary = build_cancer_stance_outputs(works)
+    labels.to_csv(TABLE_DIR / "cancer_stance_labels.csv", index=False)
+    trends.to_csv(TABLE_DIR / "cancer_stance_trends.csv", index=False)
+    comparison.to_csv(TABLE_DIR / "cancer_stance_model_comparison.csv", index=False)
+    save_json(TABLE_DIR / "cancer_stance_summary.json", summary)
+    return summary
 
 
 def render_figures(include: set[str] | None = None) -> list[dict]:

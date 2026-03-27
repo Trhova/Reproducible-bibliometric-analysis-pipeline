@@ -510,6 +510,7 @@ def build_cancer_stance_outputs(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
                 "publication_year": int(row["publication_year"]),
                 "time_slice": row.get("time_slice", ""),
                 "title": title_text,
+                "abstract": abstract_text,
                 "source_title": row.get("source_title", ""),
                 "has_abstract": bool(abstract_text),
                 "model_text_source": model_text_source,
@@ -525,6 +526,7 @@ def build_cancer_stance_outputs(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
                     "work_id": str(row["id"]),
                     "title_text": _truncate_text(title_text, int(model_settings.get("max_title_chars", 220))),
                     "abstract_text": _truncate_text(model_text, int(model_settings.get("max_chars", 900))),
+                    "model_input_text": _truncate_text(model_text, int(model_settings.get("max_chars", 900))),
                     "text_source": model_text_source,
                 }
             )
@@ -538,10 +540,12 @@ def build_cancer_stance_outputs(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
             if cached:
                 for key, value in cached.items():
                     labels_df.at[item["idx"], key] = value
+                labels_df.at[item["idx"], "model_input_text"] = item["model_input_text"]
                 continue
             pending.append(item)
 
         batch_size = int(model_settings.get("batch_size", 6))
+        progress_every = int(model_settings.get("progress_every", 25))
         for start in range(0, len(pending), batch_size):
             batch = pending[start : start + batch_size]
             if batch_size <= 1:
@@ -562,11 +566,18 @@ def build_cancer_stance_outputs(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
                 result = batch_results[item["idx"]]
                 for key, value in result.items():
                     labels_df.at[item["idx"], key] = value
+                labels_df.at[item["idx"], "model_input_text"] = item["model_input_text"]
                 new_cache_rows += 1
                 cache_dirty = True
             if new_cache_rows % int(model_settings.get("save_every", 25)) == 0:
                 _save_llm_cache(cache)
                 cache_dirty = False
+            completed = start + len(batch)
+            if completed % progress_every == 0 or completed == len(pending):
+                print(
+                    f"[cancer-stance] scored {completed}/{len(pending)} LLM papers; cache size {len(cache)}",
+                    flush=True,
+                )
     if cache_dirty:
         _save_llm_cache(cache)
 

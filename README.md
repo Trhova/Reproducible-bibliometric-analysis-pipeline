@@ -136,7 +136,15 @@ The reporting step builds a combined PDF report in `output/reports/` that includ
 
 Optional figures can be generated and documented without adding them to the default report. To include them in the combined PDF, append their stems to `reporting.figure_order` in the active config.
 
-The optional cancer-stance workflow uses a local Ollama model for per-abstract structured classification as a sensitivity check against the rule-based labels. By default the config targets `qwen2.5:3b` at `http://127.0.0.1:11434/api/generate`, scores the directionally interpretable cancer subset, and caches classifications under `data/processed/` so reruns do not re-score the same papers. On CPU this step is still slow enough to be treated as a resumable long-running job rather than a lightweight analysis pass.
+The optional cancer-stance workflow uses a local Ollama model for per-abstract structured classification as a sensitivity check against the rule-based labels. By default the config targets `qwen2.5:3b` at `http://127.0.0.1:11434/api/generate`, scores the full AhR+cancer subset when enough text is available, and caches classifications under `data/processed/` so reruns do not re-score the same papers. On CPU this step is still slow enough to be treated as a resumable long-running job rather than a lightweight analysis pass.
+
+To run only the cancer-stance LLM pass without recomputing the rest of the pipeline:
+
+```bash
+PYTHONPATH=src python3 -m bibliometric_pipeline.cli cancer-stance
+```
+
+This writes `output/tables/cancer_stance_labels.csv`, including the paper title, abstract, the exact model input text, rule-based stance, local-LLM stance, and confidence values for later manual review.
 
 The same step also writes Mermaid corpus-flow assets so the retention diagram can be reused in documentation or thesis materials.
 

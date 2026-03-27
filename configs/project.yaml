@@ -817,7 +817,7 @@ analysis:
         enabled: true
         endpoint: "http://127.0.0.1:11434/api/generate"
         model_name: "qwen2.5:3b"
-        prompt_version: "v3"
+        prompt_version: "v4"
         temperature: 0.0
         num_ctx: 4096
         num_predict: 192
@@ -827,11 +827,9 @@ analysis:
         min_text_chars: 80
         max_title_chars: 220
         max_chars: 900
-        save_every: 25
-        score_rule_labels:
-          - "pro_tumor"
-          - "anti_tumor"
-          - "mixed_context"
+        save_every: 5
+        progress_every: 25
+        score_rule_labels: []
     phrase_map:
       enabled: true
       min_phrase_docs: 120

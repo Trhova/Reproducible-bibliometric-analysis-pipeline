@@ -3,14 +3,14 @@ from __future__ import annotations
 import argparse
 
 from .config import set_active_project_config
-from .pipeline import analyze_data, fetch_data, generate_report, preprocess_data, render_figures, run_all
+from .pipeline import analyze_cancer_stance_only, analyze_data, fetch_data, generate_report, preprocess_data, render_figures, run_all
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Config-driven reproducible bibliometric analysis pipeline.")
     parser.add_argument(
         "command",
-        choices=["fetch", "preprocess", "analyze", "figures", "report", "all"],
+        choices=["fetch", "preprocess", "analyze", "cancer-stance", "figures", "report", "all"],
         help="Pipeline stage to run.",
     )
     parser.add_argument(
@@ -31,6 +31,8 @@ def main() -> None:
         preprocess_data()
     elif args.command == "analyze":
         analyze_data()
+    elif args.command == "cancer-stance":
+        analyze_cancer_stance_only()
     elif args.command == "figures":
         include = set(args.include) if args.include else None
         render_figures(include=include)
