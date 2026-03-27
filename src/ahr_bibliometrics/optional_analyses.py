@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from collections import Counter
+import json
 import math
 import re
+from typing import Any
 
 import numpy as np
 import pandas as pd
+import requests
 
-from .config import load_project_config, load_synonyms_config
+from .config import load_project_config, load_synonyms_config, project_paths, save_json
 from .text_processing import normalize_text, parse_pipe_list
 
 
@@ -161,39 +164,315 @@ def _assign_year_bins(years: pd.Series, width: int) -> pd.Series:
     return years.apply(lambda year: _year_bin_label(int(year), year_min, year_max, width))
 
 
-def _prototype_scores(texts: list[str], settings: dict) -> np.ndarray:
-    from sentence_transformers import SentenceTransformer
+def _llm_cache_key(work_id: str, model_settings: dict[str, Any]) -> str:
+    prompt_version = str(model_settings.get("prompt_version", "v1"))
+    model_name = str(model_settings.get("model_name", "qwen2.5:7b"))
+    return f"{work_id}::{model_name}::{prompt_version}"
 
+
+def _load_llm_cache() -> dict[str, dict[str, Any]]:
+    cache_path = project_paths().cancer_stance_llm_cache
+    if not cache_path.exists():
+        return {}
+    with cache_path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_llm_cache(cache: dict[str, dict[str, Any]]) -> None:
+    save_json(project_paths().cancer_stance_llm_cache, cache)
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("Empty LLM response.")
+    try:
+        payload = json.loads(text)
+        if isinstance(payload, dict):
+            return payload
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        raise ValueError(f"Could not find JSON object in LLM response: {text[:240]}")
+    payload = json.loads(match.group(0))
+    if not isinstance(payload, dict):
+        raise ValueError("LLM JSON payload was not an object.")
+    return payload
+
+
+def _normalize_llm_label(value: object) -> str:
+    if value is None:
+        return "unclear"
+    text = str(value).strip().lower()
+    mappings = {
+        "pro_tumor": "pro_tumor",
+        "pro-tumor": "pro_tumor",
+        "pro tumor": "pro_tumor",
+        "protumor": "pro_tumor",
+        "anti_tumor": "anti_tumor",
+        "anti-tumor": "anti_tumor",
+        "anti tumor": "anti_tumor",
+        "antitumor": "anti_tumor",
+        "mixed_context": "mixed_context",
+        "mixed/context-dependent": "mixed_context",
+        "mixed": "mixed_context",
+        "context-dependent": "mixed_context",
+        "context dependent": "mixed_context",
+        "unclear": "unclear",
+    }
+    return mappings.get(text, "unclear")
+
+
+def _coerce_confidence(value: object) -> float:
+    if isinstance(value, (int, float)):
+        return float(max(0.0, min(1.0, value)))
+    if value is None:
+        return math.nan
+    text = str(value).strip().lower().replace("%", "")
+    buckets = {
+        "very high": 0.95,
+        "high": 0.85,
+        "moderate": 0.65,
+        "medium": 0.65,
+        "low": 0.35,
+        "very low": 0.15,
+    }
+    if text in buckets:
+        return buckets[text]
+    try:
+        numeric = float(text)
+        if numeric > 1:
+            numeric /= 100.0
+        return float(max(0.0, min(1.0, numeric)))
+    except ValueError:
+        return math.nan
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:max_chars].strip()
+
+
+def _default_model_result(model_settings: dict[str, Any], text_source: str, error: str = "") -> dict[str, Any]:
+    return {
+        "model_label": "not_scored",
+        "model_display_label": "Not scored",
+        "model_confidence": math.nan,
+        "model_rationale": "",
+        "model_evidence_span": "",
+        "model_source": text_source,
+        "model_provider": "ollama",
+        "model_name": str(model_settings.get("model_name", "qwen2.5:7b")),
+        "model_error": error,
+    }
+
+
+def _normalize_model_result(payload: dict[str, Any], model_settings: dict[str, Any], text_source: str) -> dict[str, Any]:
+    label = _normalize_llm_label(payload.get("label"))
+    return {
+        "model_label": label,
+        "model_display_label": stance_display_label(label),
+        "model_confidence": _coerce_confidence(payload.get("confidence")),
+        "model_rationale": str(payload.get("rationale", "")).strip(),
+        "model_evidence_span": str(payload.get("evidence_span", "")).strip(),
+        "model_source": text_source,
+        "model_provider": "ollama",
+        "model_name": str(model_settings.get("model_name", "qwen2.5:7b")),
+        "model_error": "",
+    }
+
+
+def _build_llm_prompt(*, title_text: str, abstract_text: str) -> str:
+    return (
+        "Classify how this cancer-focused paper frames the aryl hydrocarbon receptor (AhR) in the text.\n"
+        "This is a framing task, not a truth judgment about biology.\n"
+        "Allowed labels:\n"
+        "- pro_tumor: AhR is framed as promoting tumor growth, survival, invasion, metastasis, immune evasion, or therapy resistance.\n"
+        "- anti_tumor: AhR is framed as suppressing tumor growth, preventing carcinogenesis, or supporting anti-tumor immunity.\n"
+        "- mixed_context: the text explicitly presents AhR as context-dependent, dual, or having both pro-tumor and anti-tumor roles.\n"
+        "- unclear: the text mentions AhR and cancer but does not clearly assign a directional role.\n"
+        "Return exactly one JSON object with keys: label and confidence.\n"
+        "Confidence must be a number between 0 and 1.\n\n"
+        f"TITLE: {title_text or '[none]'}\n"
+        f"ABSTRACT: {abstract_text or '[none]'}"
+    )
+
+
+def _build_llm_batch_prompt(items: list[dict[str, Any]]) -> str:
+    serialized_items = json.dumps(
+        [
+            {
+                "idx": item["idx"],
+                "title": item["title_text"] or "[none]",
+                "abstract": item["abstract_text"] or "[none]",
+            }
+            for item in items
+        ],
+        ensure_ascii=False,
+    )
+    return (
+        "Classify how each cancer-focused paper frames the aryl hydrocarbon receptor (AhR) in the text.\n"
+        "This is a framing task, not a truth judgment about biology.\n"
+        "Allowed labels: pro_tumor, anti_tumor, mixed_context, unclear.\n"
+        "Definitions:\n"
+        "- pro_tumor: AhR is framed as promoting tumor growth, survival, invasion, metastasis, immune evasion, or therapy resistance.\n"
+        "- anti_tumor: AhR is framed as suppressing tumor growth, preventing carcinogenesis, or supporting anti-tumor immunity.\n"
+        "- mixed_context: the text explicitly presents AhR as context-dependent, dual, or having both pro-tumor and anti-tumor roles.\n"
+        "- unclear: the text mentions AhR and cancer but does not clearly assign a directional role.\n"
+        "Return exactly one JSON object with key `results`, whose value is a list of objects with keys: idx, label, confidence.\n"
+        "Confidence must be a number between 0 and 1.\n\n"
+        f"PAPERS: {serialized_items}"
+    )
+
+
+def _single_response_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "label": {
+                "type": "string",
+                "enum": list(STANCE_DISPLAY_LABELS.keys()),
+            },
+            "confidence": {
+                "type": "number",
+            },
+        },
+        "required": ["label", "confidence"],
+        "additionalProperties": False,
+    }
+
+
+def _batch_response_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "results": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "idx": {"type": "integer"},
+                        "label": {
+                            "type": "string",
+                            "enum": list(STANCE_DISPLAY_LABELS.keys()),
+                        },
+                        "confidence": {"type": "number"},
+                    },
+                    "required": ["idx", "label", "confidence"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["results"],
+        "additionalProperties": False,
+    }
+
+
+def _call_ollama_json(*, prompt: str, model_settings: dict[str, Any], response_schema: dict[str, Any] | None = None) -> dict[str, Any]:
+    endpoint = str(model_settings.get("endpoint", "http://127.0.0.1:11434/api/generate"))
+    payload = {
+        "model": model_settings.get("model_name", "qwen2.5:7b"),
+        "prompt": prompt,
+        "stream": False,
+        "format": response_schema or "json",
+        "options": {
+            "temperature": float(model_settings.get("temperature", 0.0)),
+            "num_ctx": int(model_settings.get("num_ctx", 4096)),
+            "num_predict": int(model_settings.get("num_predict", 512)),
+        },
+    }
+    timeout_seconds = float(model_settings.get("timeout_seconds", 180))
+    response = requests.post(endpoint, json=payload, timeout=timeout_seconds)
+    response.raise_for_status()
+    body = response.json()
+    return _extract_json_object(str(body.get("response", "")))
+
+
+def _classify_with_local_llm(
+    *,
+    work_id: str,
+    title_text: str,
+    abstract_text: str,
+    text_source: str,
+    settings: dict[str, Any],
+    cache: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
     model_settings = settings.get("model", {})
-    model = SentenceTransformer(model_settings.get("model_name", "sentence-transformers/all-MiniLM-L6-v2"))
-    batch_size = int(model_settings.get("batch_size", 32))
-    labels = list(STANCE_DISPLAY_LABELS.keys())
-    prototypes = model_settings.get("label_prototypes", {})
-    label_texts = [prototype for label in labels for prototype in prototypes.get(label, [])]
-    label_slices: dict[str, slice] = {}
-    start = 0
-    for label in labels:
-        n = len(prototypes.get(label, []))
-        label_slices[label] = slice(start, start + n)
-        start += n
+    cache_key = _llm_cache_key(work_id, model_settings)
+    cached = cache.get(cache_key)
+    if cached:
+        return cached
 
-    text_embeddings = model.encode(
-        texts,
-        batch_size=batch_size,
-        show_progress_bar=False,
-        normalize_embeddings=True,
-    )
-    prototype_embeddings = model.encode(
-        label_texts,
-        batch_size=batch_size,
-        show_progress_bar=False,
-        normalize_embeddings=True,
-    )
-    scores = np.zeros((len(texts), len(labels)), dtype=float)
-    for idx, label in enumerate(labels):
-        label_emb = prototype_embeddings[label_slices[label]]
-        scores[:, idx] = np.max(text_embeddings @ label_emb.T, axis=1)
-    return scores
+    prompt = _build_llm_prompt(title_text=title_text, abstract_text=abstract_text)
+    last_error = ""
+    retries = int(model_settings.get("retries", 1))
+    for _ in range(retries + 1):
+        try:
+            payload = _call_ollama_json(
+                prompt=prompt,
+                model_settings=model_settings,
+                response_schema=_single_response_schema(),
+            )
+            result = _normalize_model_result(payload, model_settings, text_source)
+            cache[cache_key] = result
+            return result
+        except Exception as exc:  # noqa: BLE001
+            last_error = str(exc)
+
+    result = _default_model_result(model_settings, text_source, error=last_error)
+    cache[cache_key] = result
+    return result
+
+
+def _classify_batch_with_local_llm(
+    items: list[dict[str, Any]],
+    *,
+    settings: dict[str, Any],
+    cache: dict[str, dict[str, Any]],
+) -> dict[int, dict[str, Any]]:
+    model_settings = settings.get("model", {})
+    prompt = _build_llm_batch_prompt(items)
+    try:
+        payload = _call_ollama_json(
+            prompt=prompt,
+            model_settings=model_settings,
+            response_schema=_batch_response_schema(),
+        )
+        raw_results = payload.get("results", [])
+        by_idx: dict[int, dict[str, Any]] = {}
+        for result in raw_results:
+            idx = int(result.get("idx"))
+            item = next((candidate for candidate in items if candidate["idx"] == idx), None)
+            if item is None:
+                continue
+            normalized = _normalize_model_result(result, model_settings, item["text_source"])
+            cache[_llm_cache_key(item["work_id"], model_settings)] = normalized
+            by_idx[idx] = normalized
+        missing = [item for item in items if item["idx"] not in by_idx]
+        for item in missing:
+            by_idx[item["idx"]] = _classify_with_local_llm(
+                work_id=item["work_id"],
+                title_text=item["title_text"],
+                abstract_text=item["abstract_text"],
+                text_source=item["text_source"],
+                settings=settings,
+                cache=cache,
+            )
+        return by_idx
+    except Exception:  # noqa: BLE001
+        return {
+            item["idx"]: _classify_with_local_llm(
+                work_id=item["work_id"],
+                title_text=item["title_text"],
+                abstract_text=item["abstract_text"],
+                text_source=item["text_source"],
+                settings=settings,
+                cache=cache,
+            )
+            for item in items
+        }
 
 
 def build_cancer_stance_outputs(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
@@ -204,10 +483,14 @@ def build_cancer_stance_outputs(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
         return empty, empty, empty, {"enabled": False, "n_cancer_subset": 0}
 
     label_rows = []
-    model_texts: list[str] = []
-    model_indices: list[int] = []
-    min_text_chars = int(settings.get("model", {}).get("min_text_chars", 80))
-    for idx, row in subset.iterrows():
+    model_settings = settings.get("model", {})
+    min_text_chars = int(model_settings.get("min_text_chars", 80))
+    score_rule_labels = set(model_settings.get("score_rule_labels", []))
+    cache = _load_llm_cache() if model_settings.get("enabled", True) else {}
+    cache_dirty = False
+    new_cache_rows = 0
+    scorable_items: list[dict[str, Any]] = []
+    for _, row in subset.iterrows():
         rule = classify_stance_text(
             title_text=_clean_optional_text(row.get("title", "")),
             abstract_text=_clean_optional_text(row.get("abstract", "")),
@@ -220,6 +503,7 @@ def build_cancer_stance_outputs(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
         model_text = abstract_norm if len(abstract_norm) >= min_text_chars else ""
         if not model_text and settings.get("use_title_fallback", True) and title_norm:
             model_text = title_norm
+        model_text_source = "abstract" if model_text == abstract_norm and model_text else ("title_fallback" if model_text else "not_scored")
         label_rows.append(
             {
                 "work_id": row["id"],
@@ -228,33 +512,63 @@ def build_cancer_stance_outputs(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
                 "title": title_text,
                 "source_title": row.get("source_title", ""),
                 "has_abstract": bool(abstract_text),
-                "model_text_source": "abstract" if model_text == abstract_norm and model_text else ("title_fallback" if model_text else "not_scored"),
+                "model_text_source": model_text_source,
                 **rule,
+                **_default_model_result(model_settings, model_text_source),
             }
         )
-        if model_text:
-            model_indices.append(len(label_rows) - 1)
-            model_texts.append(model_text[: int(settings.get("model", {}).get("max_chars", 1800))])
+        should_score = bool(model_text) and (not score_rule_labels or rule["rule_label"] in score_rule_labels)
+        if model_settings.get("enabled", True) and should_score:
+            scorable_items.append(
+                {
+                    "idx": len(label_rows) - 1,
+                    "work_id": str(row["id"]),
+                    "title_text": _truncate_text(title_text, int(model_settings.get("max_title_chars", 220))),
+                    "abstract_text": _truncate_text(model_text, int(model_settings.get("max_chars", 900))),
+                    "text_source": model_text_source,
+                }
+            )
 
     labels_df = pd.DataFrame(label_rows)
-    labels_df["model_label"] = "not_scored"
-    labels_df["model_display_label"] = "Not scored"
-    labels_df["model_confidence"] = np.nan
-    labels_df["model_margin"] = np.nan
+    if model_settings.get("enabled", True) and scorable_items:
+        pending: list[dict[str, Any]] = []
+        for item in scorable_items:
+            cache_key = _llm_cache_key(item["work_id"], model_settings)
+            cached = cache.get(cache_key)
+            if cached:
+                for key, value in cached.items():
+                    labels_df.at[item["idx"], key] = value
+                continue
+            pending.append(item)
 
-    if settings.get("model", {}).get("enabled", True) and model_texts:
-        scores = _prototype_scores(model_texts, settings)
-        label_keys = list(STANCE_DISPLAY_LABELS.keys())
-        for row_idx, score_row in zip(model_indices, scores, strict=False):
-            best = int(np.argmax(score_row))
-            ranked = np.argsort(score_row)[::-1]
-            top = float(score_row[ranked[0]])
-            second = float(score_row[ranked[1]]) if len(ranked) > 1 else top
-            model_label = label_keys[best]
-            labels_df.at[row_idx, "model_label"] = model_label
-            labels_df.at[row_idx, "model_display_label"] = stance_display_label(model_label)
-            labels_df.at[row_idx, "model_confidence"] = top
-            labels_df.at[row_idx, "model_margin"] = top - second
+        batch_size = int(model_settings.get("batch_size", 6))
+        for start in range(0, len(pending), batch_size):
+            batch = pending[start : start + batch_size]
+            if batch_size <= 1:
+                batch_results = {
+                    item["idx"]: _classify_with_local_llm(
+                        work_id=item["work_id"],
+                        title_text=item["title_text"],
+                        abstract_text=item["abstract_text"],
+                        text_source=item["text_source"],
+                        settings=settings,
+                        cache=cache,
+                    )
+                    for item in batch
+                }
+            else:
+                batch_results = _classify_batch_with_local_llm(batch, settings=settings, cache=cache)
+            for item in batch:
+                result = batch_results[item["idx"]]
+                for key, value in result.items():
+                    labels_df.at[item["idx"], key] = value
+                new_cache_rows += 1
+                cache_dirty = True
+            if new_cache_rows % int(model_settings.get("save_every", 25)) == 0:
+                _save_llm_cache(cache)
+                cache_dirty = False
+    if cache_dirty:
+        _save_llm_cache(cache)
 
     labels_df["label_agreement"] = np.where(
         labels_df["model_label"].eq("not_scored"),
@@ -288,8 +602,13 @@ def build_cancer_stance_outputs(works: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
         "n_with_abstract": int(labels_df["has_abstract"].sum()),
         "abstract_coverage": float(labels_df["has_abstract"].mean()),
         "n_model_scored": int((labels_df["model_label"] != "not_scored").sum()),
+        "n_model_failed": int((labels_df["model_label"] == "not_scored").sum()),
         "rule_model_agreement_excluding_unclear": agreement_rate,
         "rule_label_counts": Counter(labels_df["rule_display_label"]).most_common(),
+        "model_label_counts": Counter(labels_df.loc[labels_df["model_label"] != "not_scored", "model_display_label"]).most_common(),
+        "model_provider": "ollama",
+        "model_name": str(model_settings.get("model_name", "qwen2.5:7b")),
+        "model_endpoint": str(model_settings.get("endpoint", "http://127.0.0.1:11434/api/generate")),
         "year_bin_width": year_bin_width,
     }
     return labels_df, trend, comparison, summary

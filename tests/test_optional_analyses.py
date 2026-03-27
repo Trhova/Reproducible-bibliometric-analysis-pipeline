@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from ahr_bibliometrics.optional_analyses import classify_stance_text, extract_phrase_hits
+from ahr_bibliometrics.optional_analyses import (
+    _extract_json_object,
+    _normalize_llm_label,
+    classify_stance_text,
+    extract_phrase_hits,
+)
 
 
 class OptionalAnalysesTests(unittest.TestCase):
@@ -46,6 +51,16 @@ class OptionalAnalysesTests(unittest.TestCase):
             phrase_patterns,
         )
         self.assertEqual(hits, ["CYP1A1", "microbiome", "tumor immunity"])
+
+    def test_extract_json_object_recovers_embedded_payload(self) -> None:
+        payload = _extract_json_object('Here is the result: {"label":"anti_tumor","confidence":0.8}')
+        self.assertEqual(payload["label"], "anti_tumor")
+        self.assertEqual(payload["confidence"], 0.8)
+
+    def test_normalize_llm_label_handles_variants(self) -> None:
+        self.assertEqual(_normalize_llm_label("anti-tumor"), "anti_tumor")
+        self.assertEqual(_normalize_llm_label("context dependent"), "mixed_context")
+        self.assertEqual(_normalize_llm_label("something else"), "unclear")
 
 
 if __name__ == "__main__":

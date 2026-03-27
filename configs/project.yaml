@@ -815,23 +815,23 @@ analysis:
             - "\\bparadoxical\\b.{0,30}\\brole\\b"
       model:
         enabled: true
-        model_name: "sentence-transformers/all-MiniLM-L6-v2"
-        batch_size: 32
+        endpoint: "http://127.0.0.1:11434/api/generate"
+        model_name: "qwen2.5:3b"
+        prompt_version: "v3"
+        temperature: 0.0
+        num_ctx: 4096
+        num_predict: 192
+        timeout_seconds: 180
+        retries: 1
+        batch_size: 1
         min_text_chars: 80
-        max_chars: 1800
-        label_prototypes:
-          pro_tumor:
-            - "AhR promotes cancer progression, tumor growth, invasion, metastasis, immune evasion, or therapy resistance."
-            - "The paper frames AhR as oncogenic or tumor-promoting in cancer."
-          anti_tumor:
-            - "AhR suppresses tumor growth, restrains carcinogenesis, or supports anti-tumor immunity."
-            - "The paper frames AhR as protective or tumor-suppressive in cancer."
-          mixed_context:
-            - "The paper says AhR has a context-dependent or dual role in cancer."
-            - "AhR is described as having both tumor-promoting and tumor-suppressive effects depending on context."
-          unclear:
-            - "The paper mentions AhR and cancer but does not clearly state whether AhR is pro-tumor or anti-tumor."
-            - "The role of AhR in cancer is discussed without a clear directional framing."
+        max_title_chars: 220
+        max_chars: 900
+        save_every: 25
+        score_rule_labels:
+          - "pro_tumor"
+          - "anti_tumor"
+          - "mixed_context"
     phrase_map:
       enabled: true
       min_phrase_docs: 120

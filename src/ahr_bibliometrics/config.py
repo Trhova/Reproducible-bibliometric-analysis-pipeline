@@ -29,6 +29,7 @@ class ProjectPaths:
     fetch_summary: Path
     works: Path
     corpus_summary: Path
+    cancer_stance_llm_cache: Path
     report_pdf: Path
     report_markdown: Path
     mermaid_flow: Path
@@ -104,6 +105,7 @@ def project_paths(project_config: dict[str, Any] | None = None) -> ProjectPaths:
         fetch_summary=RAW_DIR / "fetch_summary.csv",
         works=PROCESSED_DIR / "works.csv.gz",
         corpus_summary=PROCESSED_DIR / "corpus_summary.json",
+        cancer_stance_llm_cache=PROCESSED_DIR / f"{prefix}_cancer_stance_llm_cache.json",
         report_pdf=REPORT_DIR / f"{prefix}_bibliometric_report.pdf",
         report_markdown=REPORT_DIR / f"{prefix}_bibliometric_report.md",
         mermaid_flow=REPORT_DIR / f"{prefix}_corpus_flow.mmd",

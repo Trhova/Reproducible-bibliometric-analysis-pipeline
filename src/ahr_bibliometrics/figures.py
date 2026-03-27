@@ -1516,13 +1516,13 @@ def render_cancer_stance(summary: dict) -> dict:
             "Rule-based stance assignment used normalized abstracts as the primary evidence source, with title fallback only when the abstract did not provide a directional signal.",
             "Explicit marker sets captured pro-tumor language, anti-tumor language, and mixed/context-dependent framing.",
             "Papers with no interpretable directional language were left as `Unclear` rather than forcing a polarity label.",
-            "For a secondary sensitivity check, an open-source sentence-transformer compared abstract/title text against prototype stance descriptions and the agreement rate was summarized against the rule-based labels.",
+            f"For a secondary sensitivity check, the directionally interpretable cancer papers selected by the configured rule-label filter were sent to a local Ollama model (`{stance_summary.get('model_name', 'qwen2.5:7b')}`) with a fixed JSON classification prompt and the agreement rate was summarized against the rule-based labels.",
             "Counts were aggregated in fixed five-year bins and converted to within-bin shares for plotting.",
         ],
         "thresholds": [
             f"The cancer-focused subset contained {stance_summary['n_cancer_subset']:,} papers, of which {stance_summary['n_with_abstract']:,} ({stance_summary['abstract_coverage']:.0%}) had abstracts.",
             "The primary figure uses the rule-based labels only; the model-assisted layer is exploratory and is included as a sensitivity check rather than the thesis-default claim.",
-            "Papers with model text shorter than the configured threshold were not scored by the embedding model.",
+            "Papers with model text shorter than the configured threshold, or papers outside the configured model-scoring rule-label subset, were not sent to the local LLM and remain `Not scored` in the comparison table.",
         ],
         "plotting": [
             "Colored lines show the within-bin share of cancer-focused papers assigned to each stance class.",
@@ -1535,8 +1535,8 @@ def render_cancer_stance(summary: dict) -> dict:
         ],
         "caveats": _methods_common(summary)["caveats"] + [
             "Stance labels are based on explicit language in titles and abstracts, so papers that imply a directional role without stating it clearly can remain `Unclear`.",
-            "The model-assisted comparison is not a manually validated gold standard; it is a semantic sensitivity analysis intended to show whether a local open-source model broadly agrees with the rule-based calls.",
-            "Abstract coverage is incomplete, so some cancer-focused papers can only be classified from titles or not scored by the model layer at all.",
+            "The local-LLM comparison is not a manually validated gold standard; it is a structured sensitivity analysis intended to show whether a reusable open-source model broadly agrees with the rule-based calls.",
+            "Abstract coverage is incomplete, so some cancer-focused papers can only be classified from titles or can remain outside the local-LLM scoring subset altogether.",
         ],
     }
     write_methods_file(METHODS_DIR / "figure_11_cancer_stance_over_time.md", metadata)
