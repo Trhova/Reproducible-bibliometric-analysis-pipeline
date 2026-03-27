@@ -1,7 +1,7 @@
-# Figure 11. How AhR is framed in cancer-focused literature over time
+# Figure 11. Local-LLM framing of AhR in cancer-focused literature over time
 
 ## Figure purpose
-Summarizes whether cancer-focused AhR papers frame the receptor as pro-tumor, anti-tumor, mixed/context-dependent, or unclear, and how that framing shifts over time.
+Summarizes how a local open-source LLM classifies cancer-focused AhR papers as pro-tumor, anti-tumor, mixed/context-dependent, or unclear, and how that framing shifts over time.
 
 ## Input data
 - Corpus: Validated AhR OpenAlex corpus
@@ -18,30 +18,30 @@ Summarizes whether cancer-focused AhR papers frame the receptor as pro-tumor, an
 
 ## Analysis steps
 - The validated corpus was filtered to papers carrying either the `Cancer` disease tag or the `cancer` focus tag.
-- Rule-based stance assignment used normalized abstracts as the primary evidence source, with title fallback only when the abstract did not provide a directional signal.
-- Explicit marker sets captured pro-tumor language, anti-tumor language, and mixed/context-dependent framing.
-- Papers with no interpretable directional language were left as `Unclear` rather than forcing a polarity label.
-- For a secondary sensitivity check, an open-source sentence-transformer compared abstract/title text against prototype stance descriptions and the agreement rate was summarized against the rule-based labels.
+- Cancer-focused papers with sufficient title/abstract text were sent to a local Ollama model (`qwen2.5:3b`) with a fixed four-class JSON prompt.
+- The LLM was asked to classify how each paper framed AhR in cancer as pro-tumor, anti-tumor, mixed/context-dependent, or unclear.
+- Model outputs were cached to disk so the long-running inference step could be resumed without rescoring completed papers.
 - Counts were aggregated in fixed five-year bins and converted to within-bin shares for plotting.
+- Rule-based labels were retained only as an audit/comparison table and were not used to draw the plotted lines.
 
 ## Thresholds and filters
-- The cancer-focused subset contained 2,993 papers, of which 2,162 (72%) had abstracts.
-- The primary figure uses the rule-based labels only; the model-assisted layer is exploratory and is included as a sensitivity check rather than the thesis-default claim.
-- Papers with model text shorter than the configured threshold were not scored by the embedding model.
+- The cancer-focused subset contained 2,993 papers, of which 2,993 were scored by the local LLM.
+- Abstracts were available for 2,162 papers (72%); title fallback was used only when the abstract text was missing or too short.
+- Agreement between the rule-based and LLM labels excluding rule-`Unclear` papers was 22.3%.
 
 ## Plotting settings
-- Colored lines show the within-bin share of cancer-focused papers assigned to each stance class.
-- A lower bar panel shows the number of cancer-focused papers in each bin so denominator changes remain visible.
+- Colored lines show the within-bin share of LLM-assigned stance classes across the cancer-focused subset.
+- A lower bar panel shows the number of LLM-scored cancer-focused papers in each bin so denominator changes remain visible.
 - Anti-tumor and pro-tumor classes use contrasting teal and brick colors, while mixed/context-dependent and unclear are de-emphasized with ochre and gray.
 
 ## Interpretation notes
-- This figure should be read as a literature-framing analysis of abstracts and titles, not a direct vote on the true biological role of AhR in cancer.
-- Rising `mixed / context-dependent` share would indicate that the literature increasingly emphasizes tumor-type, ligand, or immune-context specificity rather than a single universal role.
+- This figure should be read as an LLM-assisted literature-framing analysis of abstracts and titles, not a direct vote on the true biological role of AhR in cancer.
+- A high mixed/context-dependent share indicates that the model frequently interprets the cancer literature as emphasizing conditional or dual roles rather than a single directional effect.
 
 ## Caveats
 - The corpus favors precision over total recall because ambiguous plain-acronym records were not retrieved exhaustively.
 - OpenAlex abstract coverage is incomplete, so concept-map coverage partly depends on keyword and MeSH richness rather than abstract availability alone.
 - Dictionary-tagged disease/application assignments are approximate, multi-label, and sensitive to the editable regex dictionary.
-- Stance labels are based on explicit language in titles and abstracts, so papers that imply a directional role without stating it clearly can remain `Unclear`.
-- The model-assisted comparison is not a manually validated gold standard; it is a semantic sensitivity analysis intended to show whether a local open-source model broadly agrees with the rule-based calls.
-- Abstract coverage is incomplete, so some cancer-focused papers can only be classified from titles or not scored by the model layer at all.
+- The LLM labels are not a gold standard and should be treated as machine-assisted interpretations that require manual spot-checking in the exported review table.
+- The relatively low rule-versus-LLM agreement indicates that the model often reads the same papers more cautiously or more context-dependently than the rule-based system.
+- Abstract coverage is incomplete, so some cancer-focused papers were classified using title fallback rather than full abstract text.

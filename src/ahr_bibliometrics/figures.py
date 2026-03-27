@@ -1436,14 +1436,11 @@ def render_global_geography_per_capita(summary: dict) -> dict:
 
 def render_cancer_stance(summary: dict) -> dict:
     short_name = summary.get("project_short_name", "AhR")
-    trends = pd.read_csv(TABLE_DIR / "cancer_stance_trends.csv")
     labels = pd.read_csv(TABLE_DIR / "cancer_stance_labels.csv")
     stance_summary = json.loads((TABLE_DIR / "cancer_stance_summary.json").read_text(encoding="utf-8"))
-    if trends.empty:
+    if labels.empty:
         return {}
 
-    trends["bin_start"] = trends["time_bin"].str.split("-").str[0].astype(int)
-    trends = trends.sort_values(["bin_start", "rule_label"])
     order = ["anti_tumor", "pro_tumor", "mixed_context", "unclear"]
     label_lookup = {
         "anti_tumor": "Anti-tumor framing",
@@ -1457,7 +1454,19 @@ def render_cancer_stance(summary: dict) -> dict:
         "mixed_context": BASE_COLORS["ochre"],
         "unclear": "#A8AFBA",
     }
-    totals = trends[["time_bin", "bin_total", "bin_start"]].drop_duplicates().sort_values("bin_start")
+    model_labels = labels[labels["model_label"] != "not_scored"].copy()
+    model_labels["bin_start"] = model_labels["time_bin"].str.split("-").str[0].astype(int)
+    trend = (
+        model_labels.groupby(["time_bin", "bin_start", "model_label"], as_index=False)
+        .agg(n_papers=("work_id", "nunique"))
+    )
+    totals = (
+        model_labels.groupby(["time_bin", "bin_start"], as_index=False)
+        .agg(bin_total=("work_id", "nunique"))
+        .sort_values("bin_start")
+    )
+    trend = trend.merge(totals, on=["time_bin", "bin_start"], how="left")
+    trend["share"] = trend["n_papers"] / trend["bin_total"]
 
     set_plot_style()
     fig, axes = plt.subplots(
@@ -1468,7 +1477,7 @@ def render_cancer_stance(summary: dict) -> dict:
         gridspec_kw={"height_ratios": [3.0, 1.0], "hspace": 0.08},
     )
     for label in order:
-        subset = trends[trends["rule_label"] == label].copy()
+        subset = trend[trend["model_label"] == label].copy()
         subset = totals[["time_bin", "bin_start"]].merge(
             subset[["time_bin", "share"]],
             on="time_bin",
@@ -1486,11 +1495,11 @@ def render_cancer_stance(summary: dict) -> dict:
     axes[0].set_ylim(0, 1.0)
     axes[0].yaxis.set_major_formatter(PercentFormatter(1.0))
     axes[0].set_ylabel("Share of cancer subset")
-    axes[0].set_title(f"How {short_name} Is Framed in Cancer-Focused Literature", loc="left", pad=12)
+    axes[0].set_title(f"How a Local LLM Frames {short_name} in Cancer Literature", loc="left", pad=12)
     axes[0].text(
         0.0,
         1.01,
-        f"Cancer-related subset: {stance_summary['n_cancer_subset']:,} papers; abstracts available for {stance_summary['n_with_abstract']:,} ({stance_summary['abstract_coverage']:.0%}).",
+        f"Cancer-related subset: {stance_summary['n_cancer_subset']:,} papers; LLM-scored papers: {stance_summary['n_model_scored']:,}; model: {stance_summary.get('model_name', 'qwen2.5:3b')}.",
         transform=axes[0].transAxes,
         fontsize=10.1,
         color=BASE_COLORS["slate"],
@@ -1509,34 +1518,34 @@ def render_cancer_stance(summary: dict) -> dict:
 
     save_figure(fig, "figure_11_cancer_stance_over_time")
     metadata = _methods_common(summary) | {
-        "title": f"Figure 11. How {short_name} is framed in cancer-focused literature over time",
-        "purpose": f"Summarizes whether cancer-focused {short_name} papers frame the receptor as pro-tumor, anti-tumor, mixed/context-dependent, or unclear, and how that framing shifts over time.",
+        "title": f"Figure 11. Local-LLM framing of {short_name} in cancer-focused literature over time",
+        "purpose": f"Summarizes how a local open-source LLM classifies cancer-focused {short_name} papers as pro-tumor, anti-tumor, mixed/context-dependent, or unclear, and how that framing shifts over time.",
         "analysis_steps": [
             "The validated corpus was filtered to papers carrying either the `Cancer` disease tag or the `cancer` focus tag.",
-            "Rule-based stance assignment used normalized abstracts as the primary evidence source, with title fallback only when the abstract did not provide a directional signal.",
-            "Explicit marker sets captured pro-tumor language, anti-tumor language, and mixed/context-dependent framing.",
-            "Papers with no interpretable directional language were left as `Unclear` rather than forcing a polarity label.",
-            f"For a secondary sensitivity check, cancer-focused papers with sufficient text were sent to a local Ollama model (`{stance_summary.get('model_name', 'qwen2.5:7b')}`) with a fixed JSON classification prompt and the agreement rate was summarized against the rule-based labels.",
+            f"Cancer-focused papers with sufficient title/abstract text were sent to a local Ollama model (`{stance_summary.get('model_name', 'qwen2.5:3b')}`) with a fixed four-class JSON prompt.",
+            "The LLM was asked to classify how each paper framed AhR in cancer as pro-tumor, anti-tumor, mixed/context-dependent, or unclear.",
+            "Model outputs were cached to disk so the long-running inference step could be resumed without rescoring completed papers.",
             "Counts were aggregated in fixed five-year bins and converted to within-bin shares for plotting.",
+            "Rule-based labels were retained only as an audit/comparison table and were not used to draw the plotted lines.",
         ],
         "thresholds": [
-            f"The cancer-focused subset contained {stance_summary['n_cancer_subset']:,} papers, of which {stance_summary['n_with_abstract']:,} ({stance_summary['abstract_coverage']:.0%}) had abstracts.",
-            "The primary figure uses the rule-based labels only; the model-assisted layer is exploratory and is included as a sensitivity check rather than the thesis-default claim.",
-            "Papers with model text shorter than the configured threshold were not sent to the local LLM and remain `Not scored` in the comparison table.",
+            f"The cancer-focused subset contained {stance_summary['n_cancer_subset']:,} papers, of which {stance_summary['n_model_scored']:,} were scored by the local LLM.",
+            f"Abstracts were available for {stance_summary['n_with_abstract']:,} papers ({stance_summary['abstract_coverage']:.0%}); title fallback was used only when the abstract text was missing or too short.",
+            f"Agreement between the rule-based and LLM labels excluding rule-`Unclear` papers was {stance_summary.get('rule_model_agreement_excluding_unclear', float('nan')):.1%}.",
         ],
         "plotting": [
-            "Colored lines show the within-bin share of cancer-focused papers assigned to each stance class.",
-            "A lower bar panel shows the number of cancer-focused papers in each bin so denominator changes remain visible.",
+            "Colored lines show the within-bin share of LLM-assigned stance classes across the cancer-focused subset.",
+            "A lower bar panel shows the number of LLM-scored cancer-focused papers in each bin so denominator changes remain visible.",
             "Anti-tumor and pro-tumor classes use contrasting teal and brick colors, while mixed/context-dependent and unclear are de-emphasized with ochre and gray.",
         ],
         "interpretation": [
-            "This figure should be read as a literature-framing analysis of abstracts and titles, not a direct vote on the true biological role of AhR in cancer.",
-            "Rising `mixed / context-dependent` share would indicate that the literature increasingly emphasizes tumor-type, ligand, or immune-context specificity rather than a single universal role.",
+            "This figure should be read as an LLM-assisted literature-framing analysis of abstracts and titles, not a direct vote on the true biological role of AhR in cancer.",
+            "A high mixed/context-dependent share indicates that the model frequently interprets the cancer literature as emphasizing conditional or dual roles rather than a single directional effect.",
         ],
         "caveats": _methods_common(summary)["caveats"] + [
-            "Stance labels are based on explicit language in titles and abstracts, so papers that imply a directional role without stating it clearly can remain `Unclear`.",
-            "The local-LLM comparison is not a manually validated gold standard; it is a structured sensitivity analysis intended to show whether a reusable open-source model broadly agrees with the rule-based calls.",
-            "Abstract coverage is incomplete, so some cancer-focused papers can only be classified from titles or can remain `Not scored` if they lack enough text for model inference.",
+            "The LLM labels are not a gold standard and should be treated as machine-assisted interpretations that require manual spot-checking in the exported review table.",
+            "The relatively low rule-versus-LLM agreement indicates that the model often reads the same papers more cautiously or more context-dependently than the rule-based system.",
+            "Abstract coverage is incomplete, so some cancer-focused papers were classified using title fallback rather than full abstract text.",
         ],
     }
     write_methods_file(METHODS_DIR / "figure_11_cancer_stance_over_time.md", metadata)
